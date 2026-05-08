@@ -46,6 +46,7 @@ data class FfzBadgeDto(
     val id: Int,
     val name: String = "",
     val title: String = "",
+    val color: String? = null,
     val urls: Map<String, String> = emptyMap(),
     val width: Int = 18,
     val height: Int = 18

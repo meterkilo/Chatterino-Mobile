@@ -10,7 +10,8 @@ fun FfzBadgeDto.toDomain(): Badge {
         id = "ffz:$id",
         imageURL = imageUrl,
         description = title.ifBlank { name },
-        provider = BadgeProvider.FFZ
+        provider = BadgeProvider.FFZ,
+        backgroundColor = color?.toArgbLong()
     )
 }
 
@@ -22,4 +23,13 @@ private fun normalizeUrl(url: String): String {
         trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
         else -> "https://$trimmed"
     }
+}
+
+private fun String.toArgbLong(): Long? {
+    val normalized = trim().removePrefix("#")
+    if (normalized.length != 6 && normalized.length != 8) return null
+    return runCatching {
+        val value = normalized.toLong(radix = 16)
+        if (normalized.length == 6) 0xFF000000 or value else value
+    }.getOrNull()
 }

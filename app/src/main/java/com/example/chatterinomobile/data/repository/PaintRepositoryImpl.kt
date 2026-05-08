@@ -1,6 +1,7 @@
 package com.example.chatterinomobile.data.repository
 
 import android.util.Log
+import com.example.chatterinomobile.data.local.PaintDiskCache
 import com.example.chatterinomobile.data.model.Paint
 import com.example.chatterinomobile.data.remote.api.SevenTvCosmeticsApi
 import com.example.chatterinomobile.data.remote.mapper.toDomain
@@ -16,7 +17,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class PaintRepositoryImpl(
-    private val sevenTvCosmeticsApi: SevenTvCosmeticsApi
+    private val sevenTvCosmeticsApi: SevenTvCosmeticsApi,
+    private val diskCache: PaintDiskCache
 ) : PaintRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -31,6 +33,19 @@ class PaintRepositoryImpl(
     private val cacheMutex = Mutex()
     private val attemptedUsers = HashSet<String>()
     private val inFlightUsers = HashSet<String>()
+
+    init {
+        scope.launch {
+            diskCache.read()?.let { snapshot ->
+                cacheMutex.withLock {
+                    paintByUserId = paintByUserId + snapshot.paintsByUserId
+                }
+                for ((userId, paint) in snapshot.paintsByUserId) {
+                    _paintAssignments.tryEmit(PaintAssignment(userId, paint))
+                }
+            }
+        }
+    }
 
     override fun requestPaintForUser(twitchUserId: String) {
         if (twitchUserId.isBlank()) return
@@ -87,6 +102,7 @@ class PaintRepositoryImpl(
         if (paint != null) {
             val emitted = _paintAssignments.tryEmit(PaintAssignment(twitchUserId, paint))
             Log.d(TAG, "emitted=$emitted user=$twitchUserId paint=$paint")
+            scope.launch { diskCache.patch(twitchUserId, paint) }
         }
     }
 

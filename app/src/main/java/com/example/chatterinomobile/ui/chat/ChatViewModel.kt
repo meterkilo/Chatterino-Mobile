@@ -1,5 +1,9 @@
     package com.example.chatterinomobile.ui.chat
 
+import android.util.Log
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.chatterinomobile.data.model.ChatMessage
@@ -9,9 +13,15 @@ import com.example.chatterinomobile.data.model.ReplyMetadata
 import com.example.chatterinomobile.data.model.SendMessageResult
 import com.example.chatterinomobile.data.repository.ChatRepository
 import com.example.chatterinomobile.data.repository.PaintRepository
+import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.PersistentSet
+import kotlinx.collections.immutable.persistentHashMapOf
+import kotlinx.collections.immutable.persistentHashSetOf
+import kotlinx.collections.immutable.toPersistentHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
@@ -19,7 +29,11 @@ class ChatViewModel(
     private val paintRepository: PaintRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState(paintsByUserId = paintRepository.snapshot()))
+    val recentMessages: SnapshotStateList<ChatMessage> = mutableStateListOf()
+
+    private val _uiState = MutableStateFlow(
+        ChatUiState(paintsByUserId = paintRepository.snapshot().toPersistentHashMap())
+    )
     val uiState = _uiState.asStateFlow()
 
     private var liveCollector: Job? = null
@@ -29,18 +43,26 @@ class ChatViewModel(
         moderationCollector = viewModelScope.launch {
             chatRepository.moderationEvents.collect { event ->
                 val state = _uiState.value
-                val active = state.activeChannelLogin ?: return@collect
-                if (event.channelLogin != active) return@collect
+                val active = state.activeChannelLogin
+                Log.d(MOD_LOG_TAG, "received event=$event active=$active")
+                if (active == null) return@collect
+                if (!event.channelLogin.equals(active, ignoreCase = true)) {
+                    Log.d(MOD_LOG_TAG, "dropped (channel mismatch) event.channel=${event.channelLogin} active=$active")
+                    return@collect
+                }
                 when (event) {
-                    is ModerationEvent.ChatCleared -> update { copy(deletedIds = emptySet(), bannedLogins = emptySet()) }
-                    is ModerationEvent.MessageDeleted -> update {
-                        copy(deletedIds = deletedIds + event.targetMessageId)
+                    is ModerationEvent.ChatCleared -> update {
+                        copy(deletedIds = persistentHashSetOf(), bannedLogins = persistentHashSetOf())
+                    }
+                    is ModerationEvent.MessageDeleted -> {
+                        Log.d(MOD_LOG_TAG, "marking deleted id=${event.targetMessageId}")
+                        update { copy(deletedIds = deletedIds.add(event.targetMessageId)) }
                     }
                     is ModerationEvent.UserBanned -> update {
-                        copy(bannedLogins = bannedLogins + event.targetLogin)
+                        copy(bannedLogins = bannedLogins.add(event.targetLogin))
                     }
                     is ModerationEvent.UserTimedOut -> update {
-                        copy(bannedLogins = bannedLogins + event.targetLogin)
+                        copy(bannedLogins = bannedLogins.add(event.targetLogin))
                     }
                 }
             }
@@ -49,7 +71,7 @@ class ChatViewModel(
         viewModelScope.launch {
             paintRepository.paintAssignments.collect { assignment ->
                 update {
-                    copy(paintsByUserId = paintsByUserId + (assignment.twitchUserId to assignment.paint))
+                    copy(paintsByUserId = paintsByUserId.put(assignment.twitchUserId, assignment.paint))
                 }
             }
         }
@@ -62,13 +84,14 @@ class ChatViewModel(
         val isChannelSwitch = state.activeChannelLogin != channelLogin
         liveCollector?.cancel()
 
+        if (isChannelSwitch) recentMessages.clear()
+
         update {
             copy(
                 activeChannelLogin = channelLogin,
                 activeChannelId = channelId,
-                recentMessages = if (isChannelSwitch) emptyList() else recentMessages,
-                deletedIds = if (isChannelSwitch) emptySet() else deletedIds,
-                bannedLogins = if (isChannelSwitch) emptySet() else bannedLogins,
+                deletedIds = if (isChannelSwitch) persistentHashSetOf() else deletedIds,
+                bannedLogins = if (isChannelSwitch) persistentHashSetOf() else bannedLogins,
                 sendStatusMessage = null,
                 sendErrorMessage = null
             )
@@ -77,14 +100,28 @@ class ChatViewModel(
         if (channelLogin == null) return
 
         liveCollector = viewModelScope.launch {
-            chatRepository.messages.collect { message ->
+            chatRepository.messages.buffer(MESSAGE_UI_BUFFER_CAPACITY).collect { message ->
                 val current = _uiState.value
                 val active = current.activeChannelLogin ?: return@collect
                 if (!message.belongsTo(active, current.activeChannelId)) return@collect
-                update {
-                    copy(recentMessages = (recentMessages + message).takeLast(MAX_RECENT_MESSAGES))
-                }
+                appendMessage(message)
             }
+        }
+    }
+
+    fun stopActiveChannel() {
+        liveCollector?.cancel()
+        liveCollector = null
+        recentMessages.clear()
+        update {
+            copy(
+                activeChannelLogin = null,
+                activeChannelId = null,
+                deletedIds = persistentHashSetOf(),
+                bannedLogins = persistentHashSetOf(),
+                sendStatusMessage = null,
+                sendErrorMessage = null
+            )
         }
     }
 
@@ -119,6 +156,13 @@ class ChatViewModel(
         update { copy(sendStatusMessage = null, sendErrorMessage = null) }
     }
 
+    private fun appendMessage(message: ChatMessage) {
+        if (recentMessages.size >= MAX_RECENT_MESSAGES) {
+            recentMessages.removeAt(0)
+        }
+        recentMessages.add(message)
+    }
+
     private inline fun update(transform: ChatUiState.() -> ChatUiState) {
         _uiState.value = _uiState.value.transform()
     }
@@ -127,17 +171,19 @@ class ChatViewModel(
         channelId == activeLogin || (activeId != null && channelId == activeId)
 
     companion object {
-        private const val MAX_RECENT_MESSAGES = 200
+        private const val MAX_RECENT_MESSAGES = 1_000
+        private const val MESSAGE_UI_BUFFER_CAPACITY = 4_096
+        private const val MOD_LOG_TAG = "ChatMod"
     }
 }
 
+@Immutable
 data class ChatUiState(
     val activeChannelLogin: String? = null,
     val activeChannelId: String? = null,
-    val recentMessages: List<ChatMessage> = emptyList(),
-    val deletedIds: Set<String> = emptySet(),
-    val bannedLogins: Set<String> = emptySet(),
-    val paintsByUserId: Map<String, Paint> = emptyMap(),
+    val deletedIds: PersistentSet<String> = persistentHashSetOf(),
+    val bannedLogins: PersistentSet<String> = persistentHashSetOf(),
+    val paintsByUserId: PersistentMap<String, Paint> = persistentHashMapOf(),
     val sendStatusMessage: String? = null,
     val sendErrorMessage: String? = null
 )

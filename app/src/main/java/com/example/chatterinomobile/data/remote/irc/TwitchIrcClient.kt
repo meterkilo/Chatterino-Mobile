@@ -1,5 +1,6 @@
 package com.example.chatterinomobile.data.remote.irc
 
+import android.util.Log
 import com.example.chatterinomobile.data.repository.AuthRepository
 import com.example.chatterinomobile.data.model.SendMessageResult
 import io.ktor.client.HttpClient
@@ -31,8 +32,7 @@ class TwitchIrcClient(
 
     private val _incoming = MutableSharedFlow<IrcMessage>(
         replay = 0,
-        extraBufferCapacity = 256,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
+        extraBufferCapacity = INCOMING_BUFFER_CAPACITY
     )
     val incoming: Flow<IrcMessage> = _incoming.asSharedFlow()
 
@@ -90,6 +90,9 @@ class TwitchIrcClient(
                         val pongTarget = parsed.trailing ?: "tmi.twitch.tv"
                         ws.send("PONG :$pongTarget")
                         continue
+                    }
+                    if (parsed.command == "CLEARMSG" || parsed.command == "CLEARCHAT") {
+                        Log.d("ChatMod", "irc frame: $line")
                     }
                     _incoming.emit(parsed)
                 }
@@ -153,5 +156,6 @@ class TwitchIrcClient(
 
     companion object {
         private const val WS_URL = "wss://irc-ws.chat.twitch.tv:443"
+        private const val INCOMING_BUFFER_CAPACITY = 4_096
     }
 }

@@ -13,15 +13,19 @@ import com.example.chatterinomobile.data.remote.irc.ModerationEventMapper
 import com.example.chatterinomobile.data.remote.irc.RoomStateMapper
 import com.example.chatterinomobile.data.remote.irc.TwitchIrcClient
 import com.example.chatterinomobile.data.remote.irc.UserStateMapper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.shareIn
@@ -55,6 +59,8 @@ class ChatRepositoryImpl(
     private var shouldReconnect = false
     private val joinedChannelLogins = LinkedHashSet<String>()
     private val channelCacheByLogin = HashMap<String, Channel>()
+    private val hydrationJobsByLogin = HashMap<String, Job>()
+    private val requestedThirdPartyBadgeUsers = HashSet<String>()
     private val sendTimestampsByChannel = HashMap<String, ArrayDeque<Long>>()
 
     private val _roomStates = MutableStateFlow<Map<String, RoomState>>(emptyMap())
@@ -106,11 +112,19 @@ class ChatRepositoryImpl(
 
     override val messages: Flow<ChatMessage> =
         ircClient.incoming
+            .buffer(MESSAGE_PIPELINE_BUFFER_CAPACITY)
             .mapNotNull { raw ->
-                ensureGlobalCachesLoaded()
                 mapper.map(raw)
             }
-            .map { msg -> enricher.enrich(msg) }
+            .map { msg ->
+                enricher.requestCosmetics(msg)
+                if (shouldRequestThirdPartyBadges(msg.author.id)) {
+                    scope.launch {
+                        runCatching { enricher.loadThirdPartyBadges(msg) }
+                    }
+                }
+                enricher.enrichFromCache(msg)
+            }
             .shareIn(scope, SharingStarted.Eagerly, replay = 0)
 
     override val moderationEvents: Flow<ModerationEvent> =
@@ -149,6 +163,7 @@ class ChatRepositoryImpl(
         joinedChannelMutex.withLock {
             joinedChannelLogins.remove(normalizedLogin)
         }
+        cancelChannelHydration(normalizedLogin)
         ircClient.partChannel(normalizedLogin)
     }
 
@@ -215,8 +230,8 @@ class ChatRepositoryImpl(
     }
 
     private fun hydrateChannelCachesAsync(channelLogin: String) {
-        scope.launch {
-            runCatching {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
                 val channel = resolveChannel(channelLogin) ?: error("Channel not found")
                 _channelHydrationStates.value = _channelHydrationStates.value + (
                     channelLogin to ChannelHydrationState(
@@ -246,7 +261,9 @@ class ChatRepositoryImpl(
                         errorMessage = null
                     )
                 )
-            }.onFailure { throwable ->
+            } catch (throwable: CancellationException) {
+                throw throwable
+            } catch (throwable: Throwable) {
                 val channelId = channelCacheByLogin[channelLogin]?.id
                 _channelHydrationStates.value = _channelHydrationStates.value + (
                     channelLogin to ChannelHydrationState(
@@ -258,7 +275,31 @@ class ChatRepositoryImpl(
                         errorMessage = throwable.message ?: "Failed to hydrate channel"
                     )
                 )
+            } finally {
+                synchronized(hydrationJobsByLogin) {
+                    if (hydrationJobsByLogin[channelLogin] === this.coroutineContext[Job]) {
+                        hydrationJobsByLogin.remove(channelLogin)
+                    }
+                }
             }
+        }
+        synchronized(hydrationJobsByLogin) {
+            hydrationJobsByLogin.remove(channelLogin)?.cancel()
+            hydrationJobsByLogin[channelLogin] = job
+        }
+        job.start()
+    }
+
+    private fun cancelChannelHydration(channelLogin: String) {
+        synchronized(hydrationJobsByLogin) {
+            hydrationJobsByLogin.remove(channelLogin)?.cancel()
+        }
+    }
+
+    private fun shouldRequestThirdPartyBadges(twitchUserId: String): Boolean {
+        if (twitchUserId.isBlank()) return false
+        synchronized(requestedThirdPartyBadgeUsers) {
+            return requestedThirdPartyBadgeUsers.add(twitchUserId)
         }
     }
 
@@ -295,5 +336,6 @@ class ChatRepositoryImpl(
     companion object {
         private const val MAX_MESSAGES_PER_WINDOW = 20
         private const val SEND_WINDOW_MILLIS = 30_000L
+        private const val MESSAGE_PIPELINE_BUFFER_CAPACITY = 4_096
     }
 }

@@ -1,34 +1,37 @@
 package com.example.chatterinomobile.ui.chat.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.chatterinomobile.data.model.ColorStop
 import com.example.chatterinomobile.data.model.GradientFunction
 import com.example.chatterinomobile.data.model.Paint as PaintModel
 import com.example.chatterinomobile.data.model.Shadow as ShadowModel
+import kotlin.math.abs
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 @Composable
@@ -37,9 +40,11 @@ fun PaintedUsername(
     fallbackColor: Color,
     paint: PaintModel?,
     style: TextStyle,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    shadowPadding: Dp = paint.shadowPaddingPx().dp
 ) {
-    val shadow = remember(paint) { paint?.shadows?.firstOrNull()?.toComposeShadow() }
+    val shadows = remember(paint) { paint?.shadows.orEmpty().map { it.toComposeShadow() } }
+    val paddedModifier = modifier.padding(horizontal = shadowPadding)
 
     if (paint is PaintModel.Image) {
         ImagePaintedUsername(
@@ -47,8 +52,8 @@ fun PaintedUsername(
             fallbackColor = fallbackColor,
             paint = paint,
             style = style,
-            shadow = shadow,
-            modifier = modifier
+            shadows = shadows,
+            modifier = paddedModifier
         )
         return
     }
@@ -58,11 +63,34 @@ fun PaintedUsername(
     val resolved = style.copy(
         brush = brush,
         fontWeight = FontWeight.Bold,
-        shadow = shadow
+        shadow = null
     )
 
-    Box(modifier = modifier) {
+    Box(modifier = paddedModifier) {
+        PaintedUsernameShadows(
+            name = name,
+            style = style,
+            shadows = shadows
+        )
         BasicText(text = name, style = resolved)
+    }
+}
+
+@Composable
+private fun PaintedUsernameShadows(
+    name: String,
+    style: TextStyle,
+    shadows: List<Shadow>
+) {
+    shadows.forEach { shadow ->
+        BasicText(
+            text = name,
+            style = style.copy(
+                color = shadow.color,
+                fontWeight = FontWeight.Bold,
+                shadow = shadow
+            )
+        )
     }
 }
 
@@ -72,47 +100,59 @@ private fun ImagePaintedUsername(
     fallbackColor: Color,
     paint: PaintModel.Image,
     style: TextStyle,
-    shadow: Shadow?,
+    shadows: List<Shadow>,
     modifier: Modifier = Modifier
 ) {
     val textMeasurer = rememberTextMeasurer()
-    val textStyle = style.copy(
-        color = Color.Black,
-        fontWeight = FontWeight.Bold,
-        shadow = shadow
-    )
-    val textLayout = remember(name, textStyle) {
-        textMeasurer.measure(text = name, style = textStyle)
+    val maskStyle = remember(style) {
+        style.copy(
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            shadow = null
+        )
+    }
+    val textLayout = remember(name, maskStyle) {
+        textMeasurer.measure(text = name, style = maskStyle)
     }
     val density = LocalDensity.current
     val width = with(density) { textLayout.size.width.toDp() }
     val height = with(density) { textLayout.size.height.toDp() }
     val imagePainter = rememberAsyncImagePainter(model = paint.url)
 
-    Box(modifier = modifier.size(width, height)) {
-        BasicText(
-            text = name,
-            style = style.copy(
-                color = fallbackColor,
-                fontWeight = FontWeight.Bold,
-                shadow = shadow
-            )
+    val fallbackTextStyle = remember(style, fallbackColor) {
+        style.copy(
+            color = fallbackColor,
+            fontWeight = FontWeight.Bold,
+            shadow = null
         )
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawIntoCanvas { canvas ->
-                canvas.saveLayer(
-                    bounds = Rect(Offset.Zero, size),
-                    paint = Paint()
-                )
-                with(imagePainter) {
-                    draw(size = size)
-                }
-                drawText(
-                    textLayoutResult = textLayout,
-                    blendMode = BlendMode.DstIn
-                )
-                canvas.restore()
-            }
+    }
+
+    Box(modifier = modifier.size(width, height)) {
+        PaintedUsernameShadows(
+            name = name,
+            style = style,
+            shadows = shadows
+        )
+        BasicText(text = name, style = fallbackTextStyle)
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        ) {
+            BasicText(text = name, style = maskStyle)
+
+            Image(
+                painter = imagePainter,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        blendMode = BlendMode.SrcIn
+                    }
+            )
         }
     }
 }
@@ -136,6 +176,11 @@ private fun PaintModel?.toBrush(fallback: Color): Brush = when (this) {
     is PaintModel.Image -> SolidColor(fallback)
 }
 
+internal fun PaintModel?.shadowPaddingPx(): Float =
+    this?.shadows.orEmpty().maxOfOrNull { shadow ->
+        max(abs(shadow.xOffset), abs(shadow.yOffset)) + shadow.radius * 2f
+    }?.coerceIn(0f, MAX_SHADOW_PADDING_PX) ?: 0f
+
 private fun ColorStop.toPair(): Pair<Float, Color> = at to Color(color)
 
 private fun linearAt(angleDeg: Float, stops: Array<Pair<Float, Color>>): Brush {
@@ -155,3 +200,5 @@ private fun ShadowModel.toComposeShadow(): Shadow = Shadow(
     offset = Offset(xOffset, yOffset),
     blurRadius = radius
 )
+
+private const val MAX_SHADOW_PADDING_PX = 12f

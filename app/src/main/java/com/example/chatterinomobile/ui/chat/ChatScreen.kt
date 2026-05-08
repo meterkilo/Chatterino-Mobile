@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -49,15 +50,28 @@ fun ChatRoute(
 
     ChatScreen(
         state = chatState,
+        messages = chatViewModel.recentMessages,
         activeChannel = activeChannel,
         onSend = chatViewModel::sendMessage,
-        onBack = onBack
+        onBack = {
+            chatViewModel.stopActiveChannel()
+            tabsViewModel.stopActiveChannel()
+            onBack()
+        }
     )
+
+    DisposableEffect(Unit) {
+        onDispose {
+            chatViewModel.stopActiveChannel()
+            tabsViewModel.stopActiveChannel()
+        }
+    }
 }
 
 @Composable
 fun ChatScreen(
     state: ChatUiState,
+    messages: List<com.example.chatterinomobile.data.model.ChatMessage>,
     activeChannel: ActiveChannelState,
     onSend: (String) -> Unit,
     onBack: () -> Unit
@@ -75,7 +89,7 @@ fun ChatScreen(
 
         Box(modifier = Modifier.weight(1f)) {
             ChatList(
-                messages = state.recentMessages,
+                messages = messages,
                 deletedIds = state.deletedIds,
                 paintsByUserId = state.paintsByUserId,
                 showTimestamp = false,

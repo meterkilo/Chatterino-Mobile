@@ -7,7 +7,8 @@ data class Badge(
     val id: String,
     val imageURL: String,
     val description: String,
-    val provider: BadgeProvider
+    val provider: BadgeProvider,
+    val backgroundColor: Long? = null
 )
 
 @Serializable

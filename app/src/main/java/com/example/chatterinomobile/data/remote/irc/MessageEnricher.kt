@@ -16,6 +16,18 @@ class MessageEnricher(
         badgeRepository.loadThirdPartyBadgesForUser(message.author.id)
         paintRepository.requestPaintForUser(message.author.id)
 
+        return enrichFromCache(message)
+    }
+
+    fun requestCosmetics(message: ChatMessage) {
+        paintRepository.requestPaintForUser(message.author.id)
+    }
+
+    suspend fun loadThirdPartyBadges(message: ChatMessage) {
+        badgeRepository.loadThirdPartyBadgesForUser(message.author.id)
+    }
+
+    fun enrichFromCache(message: ChatMessage): ChatMessage {
         val paint = paintRepository.findPaintForUser(message.author.id)
         val badges = enrichBadges(message)
         val swapped = swapThirdPartyEmotes(

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,8 @@ import com.example.chatterinomobile.ui.theme.Twick
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.pow
 
 private const val USERNAME_ID = "username"
 
@@ -96,6 +99,44 @@ private fun deterministicColor(login: String): Color {
     val index = (login.hashCode() and Int.MAX_VALUE) % palette.size
     return Color(palette[index])
 }
+
+private fun readableUsernameColor(color: Color, background: Color = Twick.Bg): Color {
+    var candidate = color
+    repeat(MAX_READABILITY_STEPS) {
+        if (contrastRatio(candidate, background) >= MIN_USERNAME_CONTRAST) {
+            return candidate
+        }
+        candidate = lerp(candidate, Color.White, 0.18f)
+    }
+    return candidate
+}
+
+private fun contrastRatio(foreground: Color, background: Color): Float {
+    val lighter = max(relativeLuminance(foreground), relativeLuminance(background))
+    val darker = minOf(relativeLuminance(foreground), relativeLuminance(background))
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
+private fun relativeLuminance(color: Color): Float {
+    fun channel(value: Float): Float =
+        if (value <= 0.03928f) value / 12.92f
+        else ((value + 0.055f) / 1.055f).pow(2.4f)
+
+    return 0.2126f * channel(color.red) +
+        0.7152f * channel(color.green) +
+        0.0722f * channel(color.blue)
+}
+
+private fun lerp(start: Color, stop: Color, fraction: Float): Color =
+    Color(
+        red = start.red + (stop.red - start.red) * fraction,
+        green = start.green + (stop.green - start.green) * fraction,
+        blue = start.blue + (stop.blue - start.blue) * fraction,
+        alpha = start.alpha + (stop.alpha - start.alpha) * fraction
+    )
+
+private const val MIN_USERNAME_CONTRAST = 3.5f
+private const val MAX_READABILITY_STEPS = 8
 
 @Composable
 fun ChatMessageRow(
@@ -158,43 +199,55 @@ private fun MessageBody(
     val author = message.author
     val authorColor = remember(author.color, author.login) {
         val parsedColor = if (author.color != null) parseHexColor(author.color) else null
-        parsedColor ?: deterministicColor(author.login)
+        readableUsernameColor(parsedColor ?: deterministicColor(author.login))
     }
-    val usernameSuffix = if (message.Type !is MessageType.Action) ": " else " "
+    val isAction = message.Type is MessageType.Action
     val resolvedPaint = paintOverride ?: author.paint
 
-    val text = buildAnnotatedString {
-        if (showTimestamp) {
-            withStyle(TimestampStyle.toSpanStyle()) {
-                append(formatTime(message.timestamp))
+    val text = remember(message.id, deleted, showTimestamp, authorColor) {
+        buildAnnotatedString {
+            if (showTimestamp) {
+                withStyle(TimestampStyle.toSpanStyle()) {
+                    append(formatTime(message.timestamp))
+                }
+                append("  ")
             }
-            append("  ")
-        }
 
-        message.badges.forEachIndexed { index, badge ->
-            if (badge.imageURL.isBlank()) return@forEachIndexed
-            appendInlineContent(badgeId(index), "·")
+            message.badges.forEachIndexed { index, badge ->
+                if (badge.imageURL.isBlank()) return@forEachIndexed
+                appendInlineContent(badgeId(index), "·")
+                append(" ")
+            }
+
+        appendInlineContent(USERNAME_ID, author.displayName)
+        if (isAction) {
             append(" ")
+        } else {
+            append(": ")
         }
 
-        appendInlineContent(USERNAME_ID, author.displayName + usernameSuffix)
-
-        if (deleted) {
-            withStyle(SpanStyle(color = Twick.Ink3, fontStyle = FontStyle.Italic)) {
-                append("<message deleted>")
+            if (deleted) {
+                withStyle(SpanStyle(color = Twick.Ink3, textDecoration = TextDecoration.LineThrough)) {
+                    renderFragments(
+                        fragments = message.fragment,
+                        actionColor = if (message.Type is MessageType.Action) authorColor else null,
+                        deleted = true
+                    )
+                }
+            } else {
+                renderFragments(
+                    fragments = message.fragment,
+                    actionColor = if (message.Type is MessageType.Action) authorColor else null,
+                    deleted = false
+                )
             }
-        } else {
-            renderFragments(
-                fragments = message.fragment,
-                actionColor = if (message.Type is MessageType.Action) authorColor else null
-            )
         }
     }
 
     val inline = buildInlineContent(
+        messageId = message.id,
         badges = message.badges,
         displayName = author.displayName,
-        usernameSuffix = usernameSuffix,
         paint = resolvedPaint,
         authorColor = authorColor,
         fragments = message.fragment
@@ -256,13 +309,18 @@ private fun SystemMessageRow(
 
 private fun AnnotatedString.Builder.renderFragments(
     fragments: List<MessageFragment>,
-    actionColor: Color?
+    actionColor: Color?,
+    deleted: Boolean
 ) {
     fragments.forEachIndexed { index, fragment ->
         when (fragment) {
             is MessageFragment.Text -> {
-                if (actionColor != null) {
+                if (actionColor != null && !deleted) {
                     withStyle(SpanStyle(color = actionColor, fontStyle = FontStyle.Italic)) {
+                        append(fragment.content)
+                    }
+                } else if (actionColor != null) {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                         append(fragment.content)
                     }
                 } else {
@@ -273,13 +331,19 @@ private fun AnnotatedString.Builder.renderFragments(
                 appendInlineContent(emoteId(index), fragment.name)
             }
             is MessageFragment.Mention -> {
-                withStyle(
-                    SpanStyle(
-                        color = Twick.Accent,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                ) {
-                    append("@${fragment.username}")
+                if (deleted) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                        append("@${fragment.username}")
+                    }
+                } else {
+                    withStyle(
+                        SpanStyle(
+                            color = Twick.Accent,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    ) {
+                        append("@${fragment.username}")
+                    }
                 }
             }
         }

@@ -92,6 +92,16 @@ class ChannelTabsViewModel(
         }
     }
 
+    fun stopActiveChannel() {
+        val active = _activeChannelLogin.value ?: return
+        _activeChannelLogin.value = null
+
+        viewModelScope.launch {
+            runCatching { chatRepository.leaveChannel(active) }
+                .onFailure { _errorMessage.value = it.message ?: "Failed to stop chat" }
+        }
+    }
+
     fun leaveChannel(channelLogin: String) {
         val normalized = channelLogin.lowercase().removePrefix("#").trim()
         if (normalized.isBlank()) return

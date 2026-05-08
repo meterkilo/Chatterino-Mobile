@@ -60,6 +60,7 @@ dependencies {
     implementation("io.ktor:ktor-client-websockets:2.3.12")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.7")
 
     implementation("io.insert-koin:koin-android:3.5.6")
     implementation("io.insert-koin:koin-androidx-compose:3.5.6")
