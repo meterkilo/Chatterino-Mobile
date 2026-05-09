@@ -36,7 +36,6 @@ class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModel()
     private val tabsViewModel: ChannelTabsViewModel by viewModel()
     private val chatViewModel: ChatViewModel by viewModel()
-    @Suppress("unused")
     private val settingsViewModel: SettingsViewModel by viewModel()
 
     override fun onNewIntent(intent: Intent) {
@@ -68,6 +67,9 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(authState.isLoggedIn, authState.isLoading) {
                 if (authState.isLoggedIn && !authState.isLoading && !onboardingComplete) {
                     if (savedInstanceState == null) onboardingComplete = true
+                }
+                if (!authState.isLoggedIn && !authState.isLoading && onboardingComplete) {
+                    onboardingComplete = false
                 }
             }
 
@@ -114,13 +116,18 @@ class MainActivity : ComponentActivity() {
                                 DiscoveryScreen(
                                     pinnedChannelLogins = joinedChannels,
                                     onJoinChannel = tabsViewModel::joinChannel,
-                                    onRemovePin = tabsViewModel::leaveChannel
+                                    onRemovePin = tabsViewModel::leaveChannel,
+                                    onLogout = authViewModel::logout,
+                                    onClearCache = settingsViewModel::clearCache
                                 )
                             }
                             composable(Routes.Chat) {
                                 ChatRoute(
                                     chatViewModel = chatViewModel,
                                     tabsViewModel = tabsViewModel,
+                                    isLoggedIn = authState.isLoggedIn,
+                                    authUserId = authState.userId,
+                                    authLogin = authState.login,
                                     onBack = { navController.popBackStack() }
                                 )
                             }

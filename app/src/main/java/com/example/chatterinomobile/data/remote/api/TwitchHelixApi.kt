@@ -1,11 +1,15 @@
 package com.example.chatterinomobile.data.remote.api
 
 import com.example.chatterinomobile.data.remote.dto.HelixBadgeSetDto
+import com.example.chatterinomobile.data.remote.dto.HelixEmoteListResponse
+import com.example.chatterinomobile.data.remote.dto.HelixErrorDto
 import com.example.chatterinomobile.data.remote.dto.HelixFollowedChannelDto
 import com.example.chatterinomobile.data.remote.dto.HelixGameDto
 import com.example.chatterinomobile.data.remote.dto.HelixListResponse
 import com.example.chatterinomobile.data.remote.dto.HelixListResponseWithPagination
 import com.example.chatterinomobile.data.remote.dto.HelixSearchChannelDto
+import com.example.chatterinomobile.data.remote.dto.HelixSendChatMessageRequestDto
+import com.example.chatterinomobile.data.remote.dto.HelixSendChatMessageResponseDto
 import com.example.chatterinomobile.data.remote.dto.HelixStreamDto
 import com.example.chatterinomobile.data.remote.dto.HelixTotalResponse
 import com.example.chatterinomobile.data.remote.dto.HelixUserDto
@@ -16,6 +20,11 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 
 class TwitchHelixApi(
     private val httpClient: HttpClient,
@@ -158,9 +167,72 @@ class TwitchHelixApi(
         return response.data
     }
 
+    suspend fun getGlobalEmotes(): HelixEmoteListResponse {
+        val token = authRepository.getAccessToken()
+        val clientId = authRepository.getClientId()
+        return httpClient.get("$BASE_URL/chat/emotes/global") {
+            applyAuth(clientId, token)
+        }.body()
+    }
+
+    suspend fun getChannelEmotes(broadcasterId: String): HelixEmoteListResponse {
+        val token = authRepository.getAccessToken()
+        val clientId = authRepository.getClientId()
+        return httpClient.get("$BASE_URL/chat/emotes") {
+            applyAuth(clientId, token)
+            parameter("broadcaster_id", broadcasterId)
+        }.body()
+    }
+
+    suspend fun sendChatMessage(
+        broadcasterId: String,
+        senderId: String,
+        message: String,
+        replyParentMessageId: String? = null
+    ): SendChatMessageResult {
+        val token = authRepository.getAccessToken()
+            ?: return SendChatMessageResult.Failed("Sign in to send chat messages.")
+        val clientId = authRepository.getClientId()
+        val response = httpClient.post("$BASE_URL/chat/messages") {
+            applyAuth(clientId, token)
+            contentType(ContentType.Application.Json)
+            setBody(
+                HelixSendChatMessageRequestDto(
+                    broadcasterId = broadcasterId,
+                    senderId = senderId,
+                    message = message,
+                    replyParentMessageId = replyParentMessageId
+                )
+            )
+        }
+
+        if (response.status == HttpStatusCode.OK) {
+            val sent = response.body<HelixSendChatMessageResponseDto>().data.firstOrNull()
+            return if (sent?.isSent == true) {
+                SendChatMessageResult.Sent
+            } else {
+                SendChatMessageResult.NotSent(
+                    sent?.dropReason?.message ?: "Your message was not sent."
+                )
+            }
+        }
+
+        val error = runCatching { response.body<HelixErrorDto>() }.getOrNull()
+        return SendChatMessageResult.Failed(
+            error?.message?.takeIf { it.isNotBlank() }
+                ?: "Failed to send message (${response.status.value})"
+        )
+    }
+
     private fun HttpRequestBuilder.applyAuth(clientId: String, token: String?) {
         header("Client-Id", clientId)
         if (token != null) header("Authorization", "Bearer $token")
+    }
+
+    sealed interface SendChatMessageResult {
+        data object Sent : SendChatMessageResult
+        data class NotSent(val message: String) : SendChatMessageResult
+        data class Failed(val message: String) : SendChatMessageResult
     }
 
     companion object {

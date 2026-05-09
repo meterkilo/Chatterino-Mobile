@@ -52,6 +52,7 @@ val repositoryModule = module {
             sevenTvApi = get(),
             bttvApi = get(),
             ffzApi = get(),
+            helixApi = get(),
             diskCache = get(),
             dimensionStore = get()
         )

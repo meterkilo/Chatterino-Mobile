@@ -7,11 +7,14 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.chatterinomobile.data.model.ChatMessage
+import com.example.chatterinomobile.data.model.Emote
 import com.example.chatterinomobile.data.model.ModerationEvent
 import com.example.chatterinomobile.data.model.Paint
 import com.example.chatterinomobile.data.model.ReplyMetadata
 import com.example.chatterinomobile.data.model.SendMessageResult
 import com.example.chatterinomobile.data.repository.ChatRepository
+import com.example.chatterinomobile.data.repository.EmoteCatalog
+import com.example.chatterinomobile.data.repository.EmoteRepository
 import com.example.chatterinomobile.data.repository.PaintRepository
 import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.PersistentSet
@@ -26,7 +29,8 @@ import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val chatRepository: ChatRepository,
-    private val paintRepository: PaintRepository
+    private val paintRepository: PaintRepository,
+    private val emoteRepository: EmoteRepository
 ) : ViewModel() {
 
     val recentMessages: SnapshotStateList<ChatMessage> = mutableStateListOf()
@@ -35,6 +39,12 @@ class ChatViewModel(
         ChatUiState(paintsByUserId = paintRepository.snapshot().toPersistentHashMap())
     )
     val uiState = _uiState.asStateFlow()
+
+    private val _emoteCatalog = MutableStateFlow(EmoteCatalog.EMPTY)
+    val emoteCatalog = _emoteCatalog.asStateFlow()
+
+    private val _autocomplete = MutableStateFlow<EmoteAutocompleteState>(EmoteAutocompleteState.Hidden)
+    val autocomplete = _autocomplete.asStateFlow()
 
     private var liveCollector: Job? = null
     private var moderationCollector: Job? = null
@@ -97,6 +107,8 @@ class ChatViewModel(
             )
         }
 
+        refreshEmoteCatalog()
+
         if (channelLogin == null) return
 
         liveCollector = viewModelScope.launch {
@@ -113,6 +125,7 @@ class ChatViewModel(
         liveCollector?.cancel()
         liveCollector = null
         recentMessages.clear()
+        _autocomplete.value = EmoteAutocompleteState.Hidden
         update {
             copy(
                 activeChannelLogin = null,
@@ -126,7 +139,8 @@ class ChatViewModel(
     }
 
     fun sendMessage(text: String) {
-        val active = _uiState.value.activeChannelLogin ?: run {
+        val state = _uiState.value
+        val active = state.activeChannelLogin ?: run {
             update { copy(sendErrorMessage = "Join a channel first.") }
             return
         }
@@ -134,7 +148,7 @@ class ChatViewModel(
         viewModelScope.launch {
             when (val result = chatRepository.sendMessage(active, text)) {
                 SendMessageResult.Sent -> update {
-                    copy(sendStatusMessage = "Message sent.", sendErrorMessage = null)
+                    copy(sendStatusMessage = null, sendErrorMessage = null)
                 }
                 SendMessageResult.EmptyMessage -> update {
                     copy(sendErrorMessage = "Message cannot be empty.")
@@ -156,6 +170,44 @@ class ChatViewModel(
         update { copy(sendStatusMessage = null, sendErrorMessage = null) }
     }
 
+    fun onAutocompleteQuery(
+        query: AutocompleteQuery?,
+        broadcasterLogin: String? = _uiState.value.activeChannelLogin,
+        broadcasterDisplayName: String? = null
+    ) {
+        if (query == null) {
+            if (_autocomplete.value !is EmoteAutocompleteState.Hidden) {
+                _autocomplete.value = EmoteAutocompleteState.Hidden
+            }
+            return
+        }
+
+        when (query.kind) {
+            AutocompleteKind.Emote -> {
+                val channelId = _uiState.value.activeChannelId
+                val results = if (query.text.length < MIN_AUTOCOMPLETE_QUERY_LEN) {
+                    emptyList()
+                } else {
+                    emoteRepository.searchByPrefix(query.text, channelId, AUTOCOMPLETE_LIMIT)
+                }
+                _autocomplete.value = EmoteAutocompleteState.Emotes(query = query.text, results = results)
+            }
+            AutocompleteKind.User -> {
+                val results = searchUserSuggestions(
+                    query = query.text,
+                    broadcasterLogin = broadcasterLogin,
+                    broadcasterDisplayName = broadcasterDisplayName
+                )
+                _autocomplete.value = EmoteAutocompleteState.Users(query = query.text, results = results)
+            }
+        }
+    }
+
+    fun refreshEmoteCatalog() {
+        val channelId = _uiState.value.activeChannelId
+        _emoteCatalog.value = emoteRepository.listEmotesForChannel(channelId)
+    }
+
     private fun appendMessage(message: ChatMessage) {
         if (recentMessages.size >= MAX_RECENT_MESSAGES) {
             recentMessages.removeAt(0)
@@ -170,10 +222,77 @@ class ChatViewModel(
     private fun ChatMessage.belongsTo(activeLogin: String, activeId: String?): Boolean =
         channelId == activeLogin || (activeId != null && channelId == activeId)
 
+    private fun searchUserSuggestions(
+        query: String,
+        broadcasterLogin: String?,
+        broadcasterDisplayName: String?
+    ): List<UserAutocompleteSuggestion> {
+        val needle = query.lowercase()
+        val byLogin = LinkedHashMap<String, UserAutocompleteSuggestion>()
+
+        fun addSuggestion(login: String?, displayName: String?) {
+            val normalizedLogin = login?.takeIf { it.isNotBlank() } ?: return
+            val normalizedDisplay = displayName?.takeIf { it.isNotBlank() } ?: normalizedLogin
+            byLogin.putIfAbsent(
+                normalizedLogin.lowercase(),
+                UserAutocompleteSuggestion(
+                    login = normalizedLogin,
+                    displayName = normalizedDisplay
+                )
+            )
+        }
+
+        addSuggestion(broadcasterLogin, broadcasterDisplayName)
+        for (message in recentMessages.asReversed()) {
+            addSuggestion(message.author.login, message.author.displayName)
+        }
+
+        return byLogin.values
+            .asSequence()
+            .filter { suggestion ->
+                needle.isEmpty() ||
+                    suggestion.login.contains(needle, ignoreCase = true) ||
+                    suggestion.displayName.contains(needle, ignoreCase = true)
+            }
+            .sortedWith(
+                compareBy<UserAutocompleteSuggestion> { scoreUserSuggestion(it, query, needle) }
+                    .thenBy { it.displayName.lowercase() }
+            )
+            .take(USER_AUTOCOMPLETE_LIMIT)
+            .toList()
+    }
+
+    private fun scoreUserSuggestion(
+        suggestion: UserAutocompleteSuggestion,
+        query: String,
+        lowerQuery: String
+    ): Int {
+        if (lowerQuery.isEmpty()) return 0
+        val login = suggestion.login
+        val display = suggestion.displayName
+        val lowerLogin = login.lowercase()
+        val lowerDisplay = display.lowercase()
+        return when {
+            login == query || display == query -> -20
+            lowerLogin == lowerQuery || lowerDisplay == lowerQuery -> -10
+            login.startsWith(query, ignoreCase = false) ||
+                display.startsWith(query, ignoreCase = false) -> 0
+            lowerLogin.startsWith(lowerQuery) || lowerDisplay.startsWith(lowerQuery) -> 500
+            else -> {
+                val loginIndex = lowerLogin.indexOf(lowerQuery).takeIf { it >= 0 } ?: Int.MAX_VALUE / 4
+                val displayIndex = lowerDisplay.indexOf(lowerQuery).takeIf { it >= 0 } ?: Int.MAX_VALUE / 4
+                10_000 + minOf(loginIndex, displayIndex) * 100 + minOf(login.length, display.length)
+            }
+        }
+    }
+
     companion object {
         private const val MAX_RECENT_MESSAGES = 1_000
         private const val MESSAGE_UI_BUFFER_CAPACITY = 4_096
         private const val MOD_LOG_TAG = "ChatMod"
+        private const val MIN_AUTOCOMPLETE_QUERY_LEN = 1
+        private const val AUTOCOMPLETE_LIMIT = 30
+        private const val USER_AUTOCOMPLETE_LIMIT = 30
     }
 }
 
@@ -186,6 +305,31 @@ data class ChatUiState(
     val paintsByUserId: PersistentMap<String, Paint> = persistentHashMapOf(),
     val sendStatusMessage: String? = null,
     val sendErrorMessage: String? = null
+)
+
+@Immutable
+sealed interface EmoteAutocompleteState {
+    data object Hidden : EmoteAutocompleteState
+    data class Emotes(val query: String, val results: List<Emote>) : EmoteAutocompleteState
+    data class Users(val query: String, val results: List<UserAutocompleteSuggestion>) : EmoteAutocompleteState
+}
+
+@Immutable
+data class AutocompleteQuery(
+    val kind: AutocompleteKind,
+    val text: String
+)
+
+@Immutable
+enum class AutocompleteKind {
+    Emote,
+    User
+}
+
+@Immutable
+data class UserAutocompleteSuggestion(
+    val login: String,
+    val displayName: String
 )
 
 fun ReplyMetadata.describeParent(): String =

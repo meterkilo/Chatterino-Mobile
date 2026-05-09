@@ -39,6 +39,9 @@ class TwitchOAuthRepository(
     override suspend fun getLogin(): String? =
         sessionMutex.withLock { tokenStore.read()?.login }
 
+    override suspend fun getScopes(): List<String> =
+        sessionMutex.withLock { tokenStore.read()?.scopes.orEmpty() }
+
     override fun getClientId(): String = BuildConfig.TWITCH_CLIENT_ID
 
     override fun buildAuthorizeUrl(scopes: List<String>): String? {

@@ -108,6 +108,8 @@ import org.koin.androidx.compose.koinViewModel
 fun DiscoveryScreen(
     onJoinChannel: (String) -> Unit,
     onRemovePin: (String) -> Unit = {},
+    onLogout: () -> Unit = {},
+    onClearCache: () -> Unit = {},
     modifier: Modifier = Modifier,
     pinnedChannelLogins: List<String> = emptyList(),
     viewModel: DiscoveryViewModel = koinViewModel()
@@ -169,7 +171,10 @@ fun DiscoveryScreen(
                             onOpenCategory = viewModel::openCategory,
                             onCloseCategory = viewModel::closeCategory
                         )
-                        2 -> YouBody()
+                        2 -> YouBody(
+                            onLogout = onLogout,
+                            onClearCache = onClearCache
+                        )
                         else -> BrowseBody(
                             state = state,
                             onJoinChannel = onJoinChannel,
@@ -1306,12 +1311,78 @@ private fun AddPinFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun YouBody() {
-    PlaceholderBody(
-        icon = Icons.Filled.Person,
-        title = "You",
-        message = "Your account and saved spaces will live here."
-    )
+private fun YouBody(
+    onLogout: () -> Unit,
+    onClearCache: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Twick.S2)
+                    .border(1.dp, Twick.Hairline, RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Person,
+                    contentDescription = null,
+                    tint = Twick.Ink,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Column {
+                Text(text = "You", color = Twick.Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Account and app data",
+                    color = Twick.Ink3,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        YouActionRow(
+            label = "Clear app data (cache + token)",
+            description = "Wipes Coil cache, emote/badge metadata, follow list, and Twitch token. Equivalent to clearing app storage. Use this to force a fresh OAuth.",
+            onClick = onClearCache
+        )
+
+        YouActionRow(
+            label = "Sign out",
+            description = "Clears your stored Twitch token only. Saved caches and pinned channels remain.",
+            onClick = onLogout
+        )
+    }
+}
+
+@Composable
+private fun YouActionRow(
+    label: String,
+    description: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Twick.S2)
+            .border(1.dp, Twick.Hairline, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(text = label, color = Twick.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = description, color = Twick.Ink3, fontSize = 12.sp)
+    }
 }
 
 @Composable

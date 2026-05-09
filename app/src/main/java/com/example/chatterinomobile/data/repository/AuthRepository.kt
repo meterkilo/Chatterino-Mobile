@@ -10,6 +10,8 @@ interface AuthRepository {
 
     suspend fun getLogin(): String?
 
+    suspend fun getScopes(): List<String>
+
     fun getClientId(): String
 
     fun buildAuthorizeUrl(scopes: List<String> = DEFAULT_TWITCH_SCOPES): String?
@@ -25,7 +27,9 @@ interface AuthRepository {
         val DEFAULT_TWITCH_SCOPES = listOf(
             "chat:read",
             "chat:edit",
-            "user:read:follows"
+            "user:write:chat",
+            "user:read:follows",
+            "user:read:emotes"
         )
     }
 }

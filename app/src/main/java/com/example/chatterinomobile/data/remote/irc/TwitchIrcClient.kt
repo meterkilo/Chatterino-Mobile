@@ -48,30 +48,16 @@ class TwitchIrcClient(
 
     private var session: DefaultClientWebSocketSession? = null
     private var readerJob: Job? = null
+    private var connectedAccessToken: String? = null
+    private var connectedNick: String? = null
     private val joinedChannels = HashSet<String>()
 
     suspend fun connect() {
+        val auth = currentAuth()
         stateMutex.withLock {
-            if (session != null) return
-            val token = authRepository.getAccessToken()
-            val nick = if (token != null) {
-                authRepository.getUserId()?.let { "user_$it" } ?: anonymousNick()
-            } else {
-                anonymousNick()
-            }
+            if (session != null && isConnectionCurrent(auth)) return
 
-            val ws = httpClient.webSocketSession(urlString = WS_URL)
-            session = ws
-
-            ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership")
-            if (token != null) ws.send("PASS oauth:$token")
-            ws.send("NICK $nick")
-
-            for (channel in joinedChannels) {
-                ws.send("JOIN #$channel")
-            }
-
-            readerJob = scope.launch { readLoop(ws) }
+            openSessionLocked(auth)
         }
     }
 
@@ -94,6 +80,12 @@ class TwitchIrcClient(
                     if (parsed.command == "CLEARMSG" || parsed.command == "CLEARCHAT") {
                         Log.d("ChatMod", "irc frame: $line")
                     }
+                    if (parsed.command == "USERSTATE" || parsed.command == "GLOBALUSERSTATE" ||
+                        parsed.command == "NOTICE" || parsed.command == "001" ||
+                        parsed.command == "CAP" || parsed.command == "RECONNECT"
+                    ) {
+                        Log.d("TwitchIrc", "frame: $line")
+                    }
                     _incoming.emit(parsed)
                 }
             }
@@ -111,10 +103,30 @@ class TwitchIrcClient(
 
     suspend fun joinChannel(login: String) {
         val normalized = login.lowercase().removePrefix("#")
+        val auth = currentAuth()
         stateMutex.withLock {
-            if (!joinedChannels.add(normalized)) return
-            session?.send("JOIN #$normalized")
+            val wasAdded = joinedChannels.add(normalized)
+            if (session != null && !isConnectionCurrent(auth)) {
+                openSessionLocked(auth)
+            } else if (wasAdded) {
+                session?.send("JOIN #$normalized")
+            }
         }
+    }
+
+    suspend fun prepareToReceiveOwnMessages(channelLogin: String): SendMessageResult {
+        val auth = currentAuth()
+        if (auth.accessToken == null) return SendMessageResult.Anonymous
+        val normalized = channelLogin.lowercase().removePrefix("#")
+        stateMutex.withLock {
+            val wasAdded = joinedChannels.add(normalized)
+            if (session == null || !isConnectionCurrent(auth)) {
+                openSessionLocked(auth)
+            } else if (wasAdded) {
+                session?.send("JOIN #$normalized")
+            }
+        }
+        return SendMessageResult.Sent
     }
 
     suspend fun partChannel(login: String) {
@@ -127,7 +139,8 @@ class TwitchIrcClient(
 
     suspend fun sendMessage(channelLogin: String, text: String): SendMessageResult {
         if (text.isBlank()) return SendMessageResult.EmptyMessage
-        if (authRepository.getAccessToken() == null) return SendMessageResult.Anonymous
+        val prepareResult = prepareToReceiveOwnMessages(channelLogin)
+        if (prepareResult != SendMessageResult.Sent) return prepareResult
         val channel = channelLogin.lowercase().removePrefix("#")
         val ws = stateMutex.withLock { session } ?: return SendMessageResult.Disconnected
         return runCatching {
@@ -148,11 +161,62 @@ class TwitchIrcClient(
 
             }
             session = null
+            connectedAccessToken = null
+            connectedNick = null
         }
+    }
+
+    private suspend fun openSessionLocked(auth: ConnectionAuth) {
+        readerJob?.cancel()
+        readerJob = null
+        try {
+            session?.close()
+        } catch (_: Throwable) {
+
+        }
+        session = null
+        connectedAccessToken = null
+        connectedNick = null
+
+        val ws = httpClient.webSocketSession(urlString = WS_URL)
+        session = ws
+        connectedAccessToken = auth.accessToken
+        connectedNick = auth.nick
+
+        Log.d("TwitchIrc", "connecting authenticated=${auth.accessToken != null} nick=${auth.nick}")
+        ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership")
+        if (auth.accessToken != null) ws.send("PASS oauth:${auth.accessToken}")
+        ws.send("NICK ${auth.nick}")
+
+        for (channel in joinedChannels) {
+            ws.send("JOIN #$channel")
+        }
+
+        readerJob = scope.launch { readLoop(ws) }
+    }
+
+    private suspend fun currentAuth(): ConnectionAuth {
+        val token = authRepository.getAccessToken()
+        val nick = if (token != null) {
+            authRepository.getLogin()?.lowercase() ?: anonymousNick()
+        } else {
+            anonymousNick()
+        }
+        return ConnectionAuth(accessToken = token, nick = nick)
+    }
+
+    private fun isConnectionCurrent(auth: ConnectionAuth): Boolean {
+        if (auth.accessToken == null) return connectedAccessToken == null
+        return connectedAccessToken == auth.accessToken && connectedNick == auth.nick
     }
 
     private fun anonymousNick(): String =
         "justinfan${Random.nextInt(10_000, 99_999)}"
+
+    private data class ConnectionAuth(
+        val accessToken: String?,
+        val nick: String
+    )
 
     companion object {
         private const val WS_URL = "wss://irc-ws.chat.twitch.tv:443"

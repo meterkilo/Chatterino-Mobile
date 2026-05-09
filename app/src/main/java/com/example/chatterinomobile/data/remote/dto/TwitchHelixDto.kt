@@ -96,3 +96,62 @@ data class HelixSearchChannelDto(
     @SerialName("game_name") val gameName: String? = null,
     val title: String? = null
 )
+
+@Serializable
+data class HelixEmoteListResponse(
+    val data: List<HelixEmoteDto> = emptyList(),
+    val template: String? = null
+)
+
+@Serializable
+data class HelixEmoteDto(
+    val id: String,
+    val name: String,
+    val images: HelixEmoteImagesDto,
+    val format: List<String> = emptyList(),
+    val scale: List<String> = emptyList(),
+    @SerialName("theme_mode") val themeMode: List<String> = emptyList(),
+    val tier: String? = null,
+    @SerialName("emote_type") val emoteType: String? = null,
+    @SerialName("emote_set_id") val emoteSetId: String? = null
+)
+
+@Serializable
+data class HelixEmoteImagesDto(
+    @SerialName("url_1x") val url1x: String,
+    @SerialName("url_2x") val url2x: String,
+    @SerialName("url_4x") val url4x: String
+)
+
+@Serializable
+data class HelixSendChatMessageRequestDto(
+    @SerialName("broadcaster_id") val broadcasterId: String,
+    @SerialName("sender_id") val senderId: String,
+    val message: String,
+    @SerialName("reply_parent_message_id") val replyParentMessageId: String? = null
+)
+
+@Serializable
+data class HelixSendChatMessageResponseDto(
+    val data: List<HelixSentChatMessageDto> = emptyList()
+)
+
+@Serializable
+data class HelixSentChatMessageDto(
+    @SerialName("message_id") val messageId: String? = null,
+    @SerialName("is_sent") val isSent: Boolean = false,
+    @SerialName("drop_reason") val dropReason: HelixChatDropReasonDto? = null
+)
+
+@Serializable
+data class HelixChatDropReasonDto(
+    val code: String? = null,
+    val message: String? = null
+)
+
+@Serializable
+data class HelixErrorDto(
+    val error: String? = null,
+    val status: Int? = null,
+    val message: String? = null
+)

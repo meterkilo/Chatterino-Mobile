@@ -21,6 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,10 +35,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.chatterinomobile.data.model.RoomState
+import com.example.chatterinomobile.data.repository.EmoteCatalog
 import com.example.chatterinomobile.ui.channels.ActiveChannelState
 import com.example.chatterinomobile.ui.channels.ChannelTabsViewModel
 import com.example.chatterinomobile.ui.chat.components.ChatInputBar
 import com.example.chatterinomobile.ui.chat.components.ChatList
+import com.example.chatterinomobile.ui.chat.components.CompletionItem
+import com.example.chatterinomobile.ui.chat.components.EmoteInsertion
+import com.example.chatterinomobile.ui.chat.components.EmotePickerSheet
 import com.example.chatterinomobile.ui.theme.Twick
 import coil.compose.AsyncImage
 
@@ -43,15 +50,33 @@ import coil.compose.AsyncImage
 fun ChatRoute(
     chatViewModel: ChatViewModel,
     tabsViewModel: ChannelTabsViewModel,
+    isLoggedIn: Boolean,
+    authUserId: String?,
+    authLogin: String?,
     onBack: () -> Unit
 ) {
     val chatState by chatViewModel.uiState.collectAsState()
     val activeChannel by tabsViewModel.activeChannel.collectAsState()
+    val autocompleteState by chatViewModel.autocomplete.collectAsState()
+    val emoteCatalog by chatViewModel.emoteCatalog.collectAsState()
 
     ChatScreen(
         state = chatState,
         messages = chatViewModel.recentMessages,
         activeChannel = activeChannel,
+        isLoggedIn = isLoggedIn,
+        authUserId = authUserId,
+        authLogin = authLogin,
+        autocompleteState = autocompleteState,
+        emoteCatalog = emoteCatalog,
+        onAutocompleteQueryChanged = { query ->
+            chatViewModel.onAutocompleteQuery(
+                query = query,
+                broadcasterLogin = activeChannel.channelLogin,
+                broadcasterDisplayName = activeChannel.channel?.displayName
+            )
+        },
+        onEmotePickerOpen = chatViewModel::refreshEmoteCatalog,
         onSend = chatViewModel::sendMessage,
         onBack = {
             chatViewModel.stopActiveChannel()
@@ -73,11 +98,27 @@ fun ChatScreen(
     state: ChatUiState,
     messages: List<com.example.chatterinomobile.data.model.ChatMessage>,
     activeChannel: ActiveChannelState,
+    isLoggedIn: Boolean,
+    authUserId: String?,
+    authLogin: String?,
+    autocompleteState: EmoteAutocompleteState,
+    emoteCatalog: EmoteCatalog,
+    onAutocompleteQueryChanged: (AutocompleteQuery?) -> Unit,
+    onEmotePickerOpen: () -> Unit,
     onSend: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    val canSend = activeChannel.channelLogin != null && activeChannel.userState?.userId != null
-    val hint = composeHint(activeChannel)
+    val canSend = activeChannel.channelLogin != null && isLoggedIn
+    val hint = composeHint(activeChannel, isLoggedIn)
+
+    var pickerOpen by remember { mutableStateOf(false) }
+    var pendingInsertion by remember { mutableStateOf<EmoteInsertion?>(null) }
+
+    val autocompleteResults: List<CompletionItem> = when (autocompleteState) {
+        is EmoteAutocompleteState.Emotes -> autocompleteState.results.map(CompletionItem::Emote)
+        is EmoteAutocompleteState.Users -> autocompleteState.results.map(CompletionItem::User)
+        EmoteAutocompleteState.Hidden -> emptyList()
+    }
 
     Column(
         modifier = Modifier
@@ -94,14 +135,38 @@ fun ChatScreen(
                 paintsByUserId = state.paintsByUserId,
                 showTimestamp = false,
                 modifier = Modifier.fillMaxSize(),
-                currentUserLogin = activeChannel.userState?.login
+                currentUserLogin = activeChannel.userState?.login ?: authLogin
             )
         }
 
         ChatInputBar(
             enabled = canSend,
             hint = hint,
-            onSend = onSend
+            message = state.sendErrorMessage,
+            messageIsError = state.sendErrorMessage != null,
+            onSend = onSend,
+            autocompleteResults = autocompleteResults,
+            onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+            onEmotePicker = {
+                onEmotePickerOpen()
+                pickerOpen = true
+            },
+            insertEmoteRequest = pendingInsertion,
+            onInsertEmoteRequestConsumed = { pendingInsertion = null }
+        )
+    }
+
+    if (pickerOpen) {
+        EmotePickerSheet(
+            catalog = emoteCatalog,
+            onDismiss = { pickerOpen = false },
+            onEmoteSelected = { emote ->
+                pendingInsertion = EmoteInsertion(
+                    name = emote.name,
+                    nonce = System.nanoTime()
+                )
+                pickerOpen = false
+            }
         )
     }
 }
@@ -221,12 +286,11 @@ private fun PartnerBadge(modifier: Modifier = Modifier) {
     )
 }
 
-private fun composeHint(active: ActiveChannelState): String {
+private fun composeHint(active: ActiveChannelState, isLoggedIn: Boolean): String {
     val login = active.channelLogin ?: return "Join a channel"
+    if (!isLoggedIn) return "Sign in to chat in $login"
     val constraint = describeRoomConstraint(active.roomState)
-    if (constraint != null) return constraint
-    if (active.userState?.userId == null) return "Sign in to chat in $login"
-    return "Send a message"
+    return if (constraint == null) "Send a message" else "Send a message ($constraint)"
 }
 
 private fun describeRoomConstraint(room: RoomState?): String? {

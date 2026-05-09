@@ -122,6 +122,11 @@ class MessageEnricherTest {
         override fun findEmote(name: String, channelId: String?): Emote? =
             channelId?.let { channelEmotes[it]?.get(name) }
 
+        override fun listEmotesForChannel(channelId: String?): com.example.chatterinomobile.data.repository.EmoteCatalog =
+            com.example.chatterinomobile.data.repository.EmoteCatalog.EMPTY
+
+        override fun searchByPrefix(query: String, channelId: String?, limit: Int): List<Emote> = emptyList()
+
         override fun recordDimensions(emoteId: String, channelId: String?, width: Int, height: Int) = Unit
 
         override fun clearCache(channelId: String?) = Unit

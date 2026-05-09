@@ -12,6 +12,8 @@ class AnonymousAuthRepository(
 
     override suspend fun getLogin(): String? = null
 
+    override suspend fun getScopes(): List<String> = emptyList()
+
     override fun getClientId(): String = clientId
 
     override fun buildAuthorizeUrl(scopes: List<String>): String? = null
