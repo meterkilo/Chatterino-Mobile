@@ -2329,36 +2329,58 @@ private fun DiscoveryBottomBar(
         BottomDestination("Browse", Icons.Filled.Explore),
         BottomDestination("You", Icons.Filled.Person)
     )
-    Row(
+    // Full-width gradient strip that fades from transparent into the page bg.
+    // The gradient sits in the upper portion; icons live in the solid black band below.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(start = 58.dp, end = 58.dp, bottom = 8.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(Twick.S1.copy(alpha = 0.92f))
-            .border(1.dp, Twick.Hairline.copy(alpha = 0.7f), RoundedCornerShape(28.dp))
-            .padding(horizontal = 6.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(150.dp)
     ) {
-        tabs.forEachIndexed { idx, destination ->
-            val isActive = idx == activeTab
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(if (isActive) Twick.AccentSoft.copy(alpha = 0.82f) else Color.Transparent)
-                    .clickable { onTabSelected(idx) }
-                    .padding(horizontal = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = destination.icon,
-                    contentDescription = destination.label,
-                    tint = if (isActive) Twick.Accent else Twick.Ink3,
-                    modifier = Modifier.size(if (isActive) 23.dp else 21.dp)
+        // Gradient fade — top half only.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Twick.Bg)
+                    )
                 )
+        )
+        // Solid black band where the icons live.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(70.dp)
+                .align(Alignment.BottomCenter)
+                .background(Twick.Bg)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tabs.forEachIndexed { idx, destination ->
+                val isActive = idx == activeTab
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { onTabSelected(idx) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = destination.icon,
+                        contentDescription = destination.label,
+                        tint = if (isActive) Twick.Ink else Twick.Ink4,
+                        modifier = Modifier.size(if (isActive) 26.dp else 24.dp)
+                    )
+                }
             }
         }
     }

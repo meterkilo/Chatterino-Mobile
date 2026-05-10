@@ -6,15 +6,22 @@ import android.net.Uri
 import android.view.ViewGroup
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.example.chatterinomobile.data.repository.TwitchPlaybackRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +37,14 @@ class StreamPlayerViewModel(
     private val _uiState = MutableStateFlow(StreamPlayerUiState())
     val uiState = _uiState.asStateFlow()
 
+    private val _qualityState = MutableStateFlow(VideoQualityState())
+    val qualityState = _qualityState.asStateFlow()
+
     @SuppressLint("StaticFieldLeak")
     private var cachedWebView: TwitchStreamWebView? = null
 
     private var nativePlayer: ExoPlayer? = null
+    private var hlsMediaSourceFactory: HlsMediaSource.Factory? = null
     private var nativeLoadJob: Job? = null
     private var activeChannelLogin: String? = null
     private var activeBackend: StreamPlayerBackend? = null
@@ -130,6 +141,7 @@ class StreamPlayerViewModel(
     private fun playNative(channelLogin: String) {
         nativeLoadJob?.cancel()
         stopEmbedPlayback()
+        _qualityState.value = VideoQualityState()
         _uiState.value = StreamPlayerUiState(
             backend = StreamPlayerBackend.Native,
             loadState = StreamPlayerLoadState.Loading,
@@ -154,19 +166,20 @@ class StreamPlayerViewModel(
 
     private fun prepareNativePlayer(channelLogin: String, playlistUrl: String) {
         val player = getOrCreateNativePlayer()
-        player.setMediaItem(
-            MediaItem.Builder()
-                .setUri(Uri.parse(playlistUrl))
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                .setLiveConfiguration(
-                    MediaItem.LiveConfiguration.Builder()
-                        .setTargetOffsetMs(LIVE_TARGET_OFFSET_MS)
-                        .setMinPlaybackSpeed(LIVE_MIN_PLAYBACK_SPEED)
-                        .setMaxPlaybackSpeed(LIVE_MAX_PLAYBACK_SPEED)
-                        .build()
-                )
-                .build()
-        )
+        val mediaItem = MediaItem.Builder()
+            .setUri(Uri.parse(playlistUrl))
+            .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setLiveConfiguration(
+                MediaItem.LiveConfiguration.Builder()
+                    .setTargetOffsetMs(LIVE_TARGET_OFFSET_MS)
+                    .setMinPlaybackSpeed(LIVE_MIN_PLAYBACK_SPEED)
+                    .setMaxPlaybackSpeed(LIVE_MAX_PLAYBACK_SPEED)
+                    .build()
+            )
+            .build()
+        val factory = hlsMediaSourceFactory
+            ?: error("HLS media source factory not initialized")
+        player.setMediaSource(factory.createMediaSource(mediaItem))
         player.prepare()
         player.playWhenReady = true
         player.play()
@@ -219,12 +232,11 @@ class StreamPlayerViewModel(
     private fun buildNativePlayer(): ExoPlayer {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(USER_AGENT)
-            .setDefaultRequestProperties(
-                mapOf(
-                    "Referer" to "https://player.twitch.tv",
-                    "Origin" to "https://player.twitch.tv"
-                )
-            )
+            .setAllowCrossProtocolRedirects(true)
+
+        hlsMediaSourceFactory = HlsMediaSource.Factory(dataSourceFactory)
+            .setAllowChunklessPreparation(true)
+            .setLoadErrorHandlingPolicy(adTolerantLoadErrorPolicy())
 
         val player = ExoPlayer.Builder(
             getApplication<Application>(),
@@ -249,6 +261,10 @@ class StreamPlayerViewModel(
                     onNativePlaybackError(error)
                 }
 
+                override fun onTracksChanged(tracks: Tracks) {
+                    refreshQualityState(tracks)
+                }
+
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     val channelLogin = activeChannelLogin ?: return
                     if (_uiState.value.backend != StreamPlayerBackend.Native) return
@@ -268,6 +284,91 @@ class StreamPlayerViewModel(
         return player
     }
 
+    private fun refreshQualityState(tracks: Tracks) {
+        val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO }
+        if (videoGroup == null) {
+            _qualityState.value = VideoQualityState()
+            return
+        }
+        val mediaGroup = videoGroup.mediaTrackGroup
+        val options = mutableListOf<VideoQualityOption>()
+        var selectedIndex = -1
+        for (i in 0 until mediaGroup.length) {
+            val format = mediaGroup.getFormat(i)
+            options += VideoQualityOption(
+                label = formatQualityLabel(format),
+                trackGroupIndex = i,
+                height = format.height,
+                bitrate = format.peakBitrate.takeIf { it > 0 } ?: format.bitrate
+            )
+            if (videoGroup.isTrackSelected(i)) selectedIndex = i
+        }
+        // Sort highest quality first; ties broken by bitrate so 720p60 beats 720p30.
+        options.sortWith(compareByDescending<VideoQualityOption> { it.height }.thenByDescending { it.bitrate })
+        val player = nativePlayer
+        val isAuto = player?.trackSelectionParameters?.overrides?.values?.none {
+            it.mediaTrackGroup == mediaGroup
+        } ?: true
+        _qualityState.value = VideoQualityState(
+            options = options,
+            selectedTrackIndex = if (isAuto) null else selectedIndex.takeIf { it >= 0 },
+            isAuto = isAuto
+        )
+    }
+
+    fun selectQuality(option: VideoQualityOption?) {
+        val player = nativePlayer ?: return
+        val tracks = player.currentTracks
+        val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+        val mediaGroup: TrackGroup = videoGroup.mediaTrackGroup
+        val builder = player.trackSelectionParameters.buildUpon()
+        // Clear any prior video override.
+        builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        if (option != null) {
+            builder.addOverride(
+                TrackSelectionOverride(mediaGroup, listOf(option.trackGroupIndex))
+            )
+        }
+        player.trackSelectionParameters = builder.build()
+        refreshQualityState(player.currentTracks)
+    }
+
+    private fun formatQualityLabel(format: androidx.media3.common.Format): String {
+        // Prefer the m3u8 NAME (parsed by ExoPlayer into Format.label) — this is
+        // Twitch's own variant name like "720p60", "480p30", "audio_only", "chunked".
+        val rawLabel = format.label?.trim()?.takeIf { it.isNotEmpty() }
+        if (rawLabel != null) {
+            return when {
+                rawLabel.equals("chunked", ignoreCase = true) -> "Source"
+                rawLabel.equals("audio_only", ignoreCase = true) -> "Audio only"
+                else -> rawLabel
+            }
+        }
+        // Fallback: synthesize "${height}p${fps}" from the format itself.
+        val height = format.height
+        val fps = format.frameRate
+        if (height <= 0) {
+            val bitrate = format.peakBitrate.takeIf { it > 0 } ?: format.bitrate
+            if (bitrate > 0) return "${bitrate / 1000} kbps"
+            return "Audio only"
+        }
+        val fpsSuffix = if (fps > 0f && fps.toInt() != 30) fps.toInt().toString() else ""
+        return "${height}p$fpsSuffix"
+    }
+
+    private fun adTolerantLoadErrorPolicy(): LoadErrorHandlingPolicy =
+        object : DefaultLoadErrorHandlingPolicy(AD_SEGMENT_RETRY_COUNT) {
+            override fun getRetryDelayMsFor(
+                loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo
+            ): Long {
+                val cause = loadErrorInfo.exception
+                val isHttp403Or404 = cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException &&
+                    (cause.responseCode == 403 || cause.responseCode == 404)
+                if (isHttp403Or404) return AD_SEGMENT_SKIP_DELAY_MS
+                return super.getRetryDelayMsFor(loadErrorInfo)
+            }
+        }
+
     private fun twitchPlayerUrl(channelLogin: String, muted: Boolean): String =
         Uri.parse("https://player.twitch.tv/")
             .buildUpon()
@@ -285,10 +386,12 @@ class StreamPlayerViewModel(
         const val LIVE_TARGET_OFFSET_MS = 2_500L
         const val LIVE_MIN_PLAYBACK_SPEED = 0.97f
         const val LIVE_MAX_PLAYBACK_SPEED = 1.03f
-        const val MIN_BUFFER_MS = 1_000
-        const val MAX_BUFFER_MS = 5_000
-        const val BUFFER_FOR_PLAYBACK_MS = 500
-        const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 1_000
+        const val MIN_BUFFER_MS = 15_000
+        const val MAX_BUFFER_MS = 50_000
+        const val BUFFER_FOR_PLAYBACK_MS = 2_000
+        const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_000
+        const val AD_SEGMENT_RETRY_COUNT = 6
+        const val AD_SEGMENT_SKIP_DELAY_MS = 500L
         const val INIT_EMBED_PLAYBACK_SCRIPT = """
             (() => {
               if (window.__chatterinoInitPlayback) {
@@ -345,6 +448,26 @@ class StreamPlayerViewModel(
             })();
         """
     }
+}
+
+data class VideoQualityOption(
+    val label: String,
+    val trackGroupIndex: Int,
+    val height: Int,
+    val bitrate: Int
+)
+
+data class VideoQualityState(
+    val options: List<VideoQualityOption> = emptyList(),
+    val selectedTrackIndex: Int? = null,
+    val isAuto: Boolean = true
+) {
+    val currentLabel: String
+        get() = when {
+            isAuto -> "Auto"
+            selectedTrackIndex != null -> options.firstOrNull { it.trackGroupIndex == selectedTrackIndex }?.label ?: "Auto"
+            else -> "Auto"
+        }
 }
 
 data class StreamPlayerUiState(

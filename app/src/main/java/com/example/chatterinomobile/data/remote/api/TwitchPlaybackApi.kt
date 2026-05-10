@@ -13,6 +13,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import java.util.UUID
 
 class TwitchPlaybackApi(
     private val httpClient: HttpClient
@@ -25,6 +26,10 @@ class TwitchPlaybackApi(
             header("Client-ID", TWITCH_WEB_CLIENT_ID)
             header("Origin", "https://www.twitch.tv")
             header("Referer", "https://www.twitch.tv/")
+            // Random per-request device id — Xtra reports this suppresses
+            // the "commercial break in progress" interstitial Twitch returns
+            // when it can't identify the client as a known device.
+            header("X-Device-Id", randomDeviceId())
             contentType(ContentType.Application.Json)
             setBody(
                 listOf(
@@ -53,6 +58,9 @@ class TwitchPlaybackApi(
             ?.streamPlaybackAccessToken
             ?: error("Twitch did not return a stream playback token.")
     }
+
+    private fun randomDeviceId(): String =
+        UUID.randomUUID().toString().replace("-", "").take(32)
 
     private companion object {
         const val GQL_URL = "https://gql.twitch.tv/gql"

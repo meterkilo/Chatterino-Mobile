@@ -5,6 +5,7 @@ import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -20,7 +21,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VideoLabel
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,13 +52,20 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.doOnAttach
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.ui.channels.ActiveChannelState
 import com.example.chatterinomobile.ui.theme.Twick
+import kotlinx.coroutines.delay
 
 @Composable
 fun TwitchStreamStage(
     activeChannel: ActiveChannelState,
     playerViewModel: StreamPlayerViewModel,
+    theaterMode: Boolean = false,
+    onTheaterToggle: (() -> Unit)? = null,
+    videoVisible: Boolean = true,
+    onVideoVisibleChange: ((Boolean) -> Unit)? = null,
+    fillBounds: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val channelLogin = activeChannel.channelLogin
@@ -64,16 +73,14 @@ fun TwitchStreamStage(
     val isOffline = channel != null && !channel.isLive
     val playerState by playerViewModel.uiState.collectAsState()
 
-    var videoEnabled by rememberSaveable(channelLogin) { mutableStateOf(true) }
     var fullscreen by rememberSaveable(channelLogin) { mutableStateOf(false) }
 
     LaunchedEffect(channelLogin) {
-        videoEnabled = true
         fullscreen = false
     }
 
-    LaunchedEffect(channelLogin, isOffline, videoEnabled) {
-        if (channelLogin != null && !isOffline && videoEnabled) {
+    LaunchedEffect(channelLogin, isOffline, videoVisible) {
+        if (channelLogin != null && !isOffline && videoVisible) {
             playerViewModel.playChannel(channelLogin)
         }
     }
@@ -84,11 +91,11 @@ fun TwitchStreamStage(
             detail = "Join a channel to watch"
         )
 
-        isOffline || !videoEnabled -> StreamPoster(
+        isOffline || !videoVisible -> StreamPoster(
             activeChannel = activeChannel,
             actionLabel = if (isOffline) "Offline" else "Show stream",
             actionEnabled = !isOffline,
-            onAction = { videoEnabled = true },
+            onAction = { onVideoVisibleChange?.invoke(true) },
             modifier = modifier
         )
 
@@ -101,18 +108,25 @@ fun TwitchStreamStage(
                 )
             } else {
                 StreamPlayerFrame(
+                    channel = channel,
                     channelLogin = channelLogin,
                     playerViewModel = playerViewModel,
                     playerState = playerState,
                     fullscreen = false,
+                    theaterMode = theaterMode,
                     onFullscreen = { fullscreen = true },
+                    onTheaterToggle = onTheaterToggle,
                     onClose = {
-                        videoEnabled = false
+                        onVideoVisibleChange?.invoke(false)
                         playerViewModel.stopPlayback()
                     },
-                    modifier = modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
+                    modifier = if (theaterMode || fillBounds) {
+                        modifier.fillMaxSize()
+                    } else {
+                        modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                    }
                 )
             }
 
@@ -126,11 +140,14 @@ fun TwitchStreamStage(
                     )
                 ) {
                     StreamPlayerFrame(
+                        channel = channel,
                         channelLogin = channelLogin,
                         playerViewModel = playerViewModel,
                         playerState = playerState,
                         fullscreen = true,
+                        theaterMode = theaterMode,
                         onFullscreen = { fullscreen = false },
+                        onTheaterToggle = onTheaterToggle,
                         onClose = { fullscreen = false },
                         modifier = Modifier
                             .fillMaxSize()
@@ -145,11 +162,14 @@ fun TwitchStreamStage(
 
 @Composable
 private fun StreamPlayerFrame(
+    channel: Channel?,
     channelLogin: String,
     playerViewModel: StreamPlayerViewModel,
     playerState: StreamPlayerUiState,
     fullscreen: Boolean,
+    theaterMode: Boolean,
     onFullscreen: () -> Unit,
+    onTheaterToggle: (() -> Unit)?,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -162,9 +182,28 @@ private fun StreamPlayerFrame(
     } else {
         playerState.loadState == StreamPlayerLoadState.Loading
     }
+    var overlayVisible by remember(channelLogin) { mutableStateOf(true) }
+    var overlayPulse by remember(channelLogin) { mutableStateOf(0) }
+    val qualityState by playerViewModel.qualityState.collectAsState()
+    var qualityMenuOpen by remember(channelLogin) { mutableStateOf(false) }
+
+    LaunchedEffect(channelLogin) {
+        overlayVisible = true
+        delay(PLAYER_OVERLAY_AUTO_HIDE_MS)
+        overlayVisible = false
+    }
+
+    LaunchedEffect(overlayPulse) {
+        if (overlayPulse > 0) {
+            overlayVisible = true
+            delay(PLAYER_OVERLAY_AUTO_HIDE_MS)
+            overlayVisible = false
+        }
+    }
 
     Box(
-        modifier = modifier.background(Color.Black),
+        modifier = modifier
+            .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
         when {
@@ -205,16 +244,34 @@ private fun StreamPlayerFrame(
             )
         }
 
-        PlayerControls(
-            fullscreen = fullscreen,
-            onFullscreen = onFullscreen,
-            onRefresh = {
-                pageLoaded = false
-                loadError = false
-                playerViewModel.refreshCurrent()
-            },
-            onClose = onClose
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable { overlayPulse += 1 }
         )
+
+        if (overlayVisible || isLoading || loadError || qualityMenuOpen) {
+            PlayerFocusOverlay(
+                channel = channel,
+                channelLogin = channelLogin,
+                fullscreen = fullscreen,
+                theaterMode = theaterMode,
+                onFullscreen = onFullscreen,
+                onTheaterToggle = onTheaterToggle,
+                qualityState = qualityState,
+                qualityMenuOpen = qualityMenuOpen,
+                onQualityClick = {
+                    qualityMenuOpen = !qualityMenuOpen
+                    overlayPulse += 1
+                },
+                onQualitySelected = { option ->
+                    playerViewModel.selectQuality(option)
+                    qualityMenuOpen = false
+                },
+                onDismissQualityMenu = { qualityMenuOpen = false },
+                onClose = onClose
+            )
+        }
     }
 }
 
@@ -315,36 +372,172 @@ private fun TwitchWebViewSurface(
 }
 
 @Composable
-private fun BoxScope.PlayerControls(
+private fun BoxScope.PlayerFocusOverlay(
+    channel: Channel?,
+    channelLogin: String,
     fullscreen: Boolean,
+    theaterMode: Boolean,
     onFullscreen: () -> Unit,
-    onRefresh: () -> Unit,
+    onTheaterToggle: (() -> Unit)?,
+    qualityState: VideoQualityState,
+    qualityMenuOpen: Boolean,
+    onQualityClick: () -> Unit,
+    onQualitySelected: (VideoQualityOption?) -> Unit,
+    onDismissQualityMenu: () -> Unit,
     onClose: () -> Unit
 ) {
-    Row(
+    // Top-left channel info — no background, just the text.
+    Column(
         modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(6.dp)
-            .background(Color.Black.copy(alpha = 0.50f)),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .align(Alignment.TopStart)
+            .padding(start = 12.dp, top = 8.dp, end = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        StreamIconButton(
-            icon = Icons.Filled.Refresh,
-            contentDescription = "Refresh stream",
-            onClick = onRefresh
+        Text(
+            text = channel.displayNameOrLogin(channelLogin),
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
-        StreamIconButton(
-            icon = if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-            contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
-            onClick = onFullscreen
-        )
-        StreamIconButton(
-            icon = Icons.Filled.Close,
-            contentDescription = "Close stream",
-            onClick = onClose
+        channel?.title?.takeIf { it.isNotBlank() }?.let { title ->
+            Text(
+                text = title,
+                color = Twick.Ink2,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if ((channel?.viewerCount ?: 0) > 0) {
+            Text(
+                text = "${formatViewerCount(channel?.viewerCount ?: 0)} viewers",
+                color = Twick.Ink3,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    // Outside-tap dismisser when the quality menu is open.
+    if (qualityMenuOpen) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismissQualityMenu
+                )
         )
     }
+
+    // Bottom-end controls — fully transparent toolbar.
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(end = 6.dp, bottom = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.align(Alignment.BottomEnd),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StreamIconButton(
+                icon = Icons.Filled.Settings,
+                contentDescription = "Video quality",
+                selected = qualityMenuOpen,
+                onClick = onQualityClick
+            )
+            if (onTheaterToggle != null && !fullscreen) {
+                StreamIconButton(
+                    icon = Icons.Filled.VideoLabel,
+                    contentDescription = if (theaterMode) "Exit theater mode" else "Theater mode",
+                    selected = theaterMode,
+                    onClick = onTheaterToggle
+                )
+            }
+            StreamIconButton(
+                icon = if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
+                onClick = onFullscreen
+            )
+            StreamIconButton(
+                icon = Icons.Filled.Close,
+                contentDescription = "Close stream",
+                onClick = onClose
+            )
+        }
+
+        if (qualityMenuOpen) {
+            Box(
+                modifier = Modifier.align(Alignment.BottomEnd)
+            ) {
+                QualitySelectorPopup(
+                    qualityState = qualityState,
+                    onQualitySelected = onQualitySelected
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QualitySelectorPopup(
+    qualityState: VideoQualityState,
+    onQualitySelected: (VideoQualityOption?) -> Unit
+) {
+    // Anchored above the gear/controls row by the parent's bottom padding.
+    Column(
+        modifier = Modifier
+            .padding(bottom = 40.dp)
+            .background(
+                color = Color.Black.copy(alpha = 0.72f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+            )
+            .padding(vertical = 6.dp, horizontal = 4.dp)
+    ) {
+        QualityRow(
+            label = "Auto",
+            selected = qualityState.isAuto,
+            onClick = { onQualitySelected(null) }
+        )
+        qualityState.options.forEach { option ->
+            QualityRow(
+                label = option.label,
+                selected = !qualityState.isAuto && qualityState.selectedTrackIndex == option.trackGroupIndex,
+                onClick = { onQualitySelected(option) }
+            )
+        }
+        if (qualityState.options.isEmpty()) {
+            Text(
+                text = "No qualities available",
+                color = Twick.Ink3,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun QualityRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Text(
+        text = label,
+        color = if (selected) Twick.Accent else Color.White,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+    )
 }
 
 @Composable
@@ -373,6 +566,7 @@ private fun StreamFullscreenPlaceholder(
 private fun StreamIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
+    selected: Boolean = false,
     onClick: () -> Unit
 ) {
     IconButton(
@@ -382,7 +576,7 @@ private fun StreamIconButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = Color.White,
+            tint = if (selected) Twick.Accent else Color.White,
             modifier = Modifier.size(18.dp)
         )
     }
@@ -392,6 +586,7 @@ private fun com.example.chatterinomobile.data.model.Channel?.displayNameOrLogin(
     this?.displayName?.takeIf { it.isNotBlank() } ?: login
 
 private const val RESUME_PLAYBACK_DELAY_MS = 100L
+private const val PLAYER_OVERLAY_AUTO_HIDE_MS = 4_000L
 
 @Composable
 private fun StreamPoster(
@@ -472,6 +667,13 @@ private fun StreamPoster(
         }
     }
 }
+
+private fun formatViewerCount(count: Int): String =
+    when {
+        count >= 1_000_000 -> "${count / 1_000_000}.${(count % 1_000_000) / 100_000}M"
+        count >= 1_000 -> "${count / 1_000}.${(count % 1_000) / 100}K"
+        else -> count.toString()
+    }
 
 @Composable
 private fun StreamEmptyState(

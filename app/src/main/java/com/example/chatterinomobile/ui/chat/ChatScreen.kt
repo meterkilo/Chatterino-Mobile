@@ -1,16 +1,23 @@
 package com.example.chatterinomobile.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Verified
@@ -122,6 +129,35 @@ fun ChatScreen(
 
     var pickerOpen by remember { mutableStateOf(false) }
     var pendingInsertion by remember { mutableStateOf<EmoteInsertion?>(null) }
+    var theaterMode by remember(activeChannel.channelLogin) { mutableStateOf(false) }
+    var videoVisible by remember(activeChannel.channelLogin) { mutableStateOf(true) }
+    var chatFullscreen by remember(activeChannel.channelLogin) { mutableStateOf(false) }
+    var verticalPlayerFraction by remember(activeChannel.channelLogin) {
+        mutableStateOf(DEFAULT_VERTICAL_PLAYER_FRACTION)
+    }
+    var horizontalPlayerFraction by remember(activeChannel.channelLogin) {
+        mutableStateOf(DEFAULT_HORIZONTAL_PLAYER_FRACTION)
+    }
+
+    fun enterChatFullscreen() {
+        videoVisible = false
+        chatFullscreen = true
+        theaterMode = false
+        streamPlayerViewModel.stopPlayback()
+    }
+
+    fun restoreDefaultPlayer() {
+        videoVisible = true
+        chatFullscreen = false
+        theaterMode = false
+        verticalPlayerFraction = DEFAULT_VERTICAL_PLAYER_FRACTION
+        horizontalPlayerFraction = DEFAULT_HORIZONTAL_PLAYER_FRACTION
+        activeChannel.channelLogin?.let(streamPlayerViewModel::playChannel)
+    }
+
+    BackHandler(enabled = chatFullscreen) {
+        restoreDefaultPlayer()
+    }
 
     val autocompleteResults: List<CompletionItem> = when (autocompleteState) {
         is EmoteAutocompleteState.Emotes -> autocompleteState.results.map(CompletionItem::Emote)
@@ -134,42 +170,173 @@ fun ChatScreen(
             .fillMaxSize()
             .background(Twick.Bg)
     ) {
-        TwitchStreamStage(
-            activeChannel = activeChannel,
-            playerViewModel = streamPlayerViewModel
-        )
-        StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .clearComposerFocusOnTap(focusManager)
-        ) {
-            ChatList(
+        if (chatFullscreen || !videoVisible) {
+            StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
+            ChatMessagePane(
+                state = state,
                 messages = messages,
-                deletedIds = state.deletedIds,
-                paintsByUserId = state.paintsByUserId,
-                showTimestamp = false,
-                modifier = Modifier.fillMaxSize(),
-                currentUserLogin = activeChannel.userState?.login ?: authLogin
+                activeChannel = activeChannel,
+                authLogin = authLogin,
+                focusManager = focusManager,
+                modifier = Modifier.weight(1f)
+            )
+            ChatInputBar(
+                enabled = canSend,
+                hint = if (chatFullscreen) "$hint - press Back to restore video" else hint,
+                message = state.sendErrorMessage,
+                messageIsError = state.sendErrorMessage != null,
+                onSend = onSend,
+                autocompleteResults = autocompleteResults,
+                onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                onEmotePicker = {
+                    onEmotePickerOpen()
+                    pickerOpen = true
+                },
+                insertEmoteRequest = pendingInsertion,
+                onInsertEmoteRequestConsumed = { pendingInsertion = null }
+            )
+        } else if (theaterMode && activeChannel.channelLogin != null) {
+            StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                val playerWidth = maxWidth * horizontalPlayerFraction
+                val chatWidth = maxWidth - playerWidth - THEATER_RESIZE_HANDLE_WIDTH
+                val availableWidth = maxWidth.value.coerceAtLeast(1f)
+                Row(modifier = Modifier.fillMaxSize()) {
+                    TwitchStreamStage(
+                        activeChannel = activeChannel,
+                        playerViewModel = streamPlayerViewModel,
+                        theaterMode = true,
+                        onTheaterToggle = { theaterMode = false },
+                        videoVisible = videoVisible,
+                        onVideoVisibleChange = { visible ->
+                            if (visible) videoVisible = true else enterChatFullscreen()
+                        },
+                        fillBounds = true,
+                        modifier = Modifier
+                            .width(playerWidth.coerceAtLeast(0.dp))
+                            .fillMaxHeight()
+                    )
+                    ResizeHandle(
+                        orientation = ResizeHandleOrientation.Vertical,
+                        modifier = Modifier
+                            .width(THEATER_RESIZE_HANDLE_WIDTH)
+                            .fillMaxHeight(),
+                        onDrag = { drag ->
+                            val next = horizontalPlayerFraction + drag / availableWidth
+                            if (next <= THEATER_HIDE_PLAYER_FRACTION) {
+                                enterChatFullscreen()
+                            } else {
+                                horizontalPlayerFraction = next.coerceIn(
+                                    MIN_THEATER_PLAYER_FRACTION,
+                                    MAX_THEATER_PLAYER_FRACTION
+                                )
+                            }
+                        }
+                    )
+                    Column(
+                        modifier = Modifier
+                            .width(chatWidth.coerceAtLeast(0.dp))
+                            .fillMaxHeight()
+                    ) {
+                        ChatMessagePane(
+                            state = state,
+                            messages = messages,
+                            activeChannel = activeChannel,
+                            authLogin = authLogin,
+                            focusManager = focusManager,
+                            modifier = Modifier.weight(1f)
+                        )
+                        ChatInputBar(
+                            enabled = canSend,
+                            hint = hint,
+                            message = state.sendErrorMessage,
+                            messageIsError = state.sendErrorMessage != null,
+                            onSend = onSend,
+                            autocompleteResults = autocompleteResults,
+                            onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                            onEmotePicker = {
+                                onEmotePickerOpen()
+                                pickerOpen = true
+                            },
+                            insertEmoteRequest = pendingInsertion,
+                            onInsertEmoteRequestConsumed = { pendingInsertion = null }
+                        )
+                    }
+                }
+            }
+        } else {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                val playerHeight = maxHeight * verticalPlayerFraction
+                val availableHeight = maxHeight.value.coerceAtLeast(1f)
+                Column(modifier = Modifier.fillMaxSize()) {
+                    TwitchStreamStage(
+                        activeChannel = activeChannel,
+                        playerViewModel = streamPlayerViewModel,
+                        theaterMode = false,
+                        onTheaterToggle = {
+                            if (activeChannel.channelLogin != null) theaterMode = true
+                        },
+                        videoVisible = videoVisible,
+                        onVideoVisibleChange = { visible ->
+                            if (visible) videoVisible = true else enterChatFullscreen()
+                        },
+                        fillBounds = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(playerHeight.coerceAtLeast(0.dp))
+                    )
+                    StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
+                    ResizeHandle(
+                        orientation = ResizeHandleOrientation.Horizontal,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(VERTICAL_RESIZE_HANDLE_HEIGHT),
+                        onDrag = { drag ->
+                            val next = verticalPlayerFraction + drag / availableHeight
+                            if (next <= VERTICAL_HIDE_PLAYER_FRACTION) {
+                                enterChatFullscreen()
+                            } else {
+                                verticalPlayerFraction = next.coerceIn(
+                                    MIN_VERTICAL_PLAYER_FRACTION,
+                                    MAX_VERTICAL_PLAYER_FRACTION
+                                )
+                            }
+                        }
+                    )
+                    ChatMessagePane(
+                        state = state,
+                        messages = messages,
+                        activeChannel = activeChannel,
+                        authLogin = authLogin,
+                        focusManager = focusManager,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            ChatInputBar(
+                enabled = canSend,
+                hint = hint,
+                message = state.sendErrorMessage,
+                messageIsError = state.sendErrorMessage != null,
+                onSend = onSend,
+                autocompleteResults = autocompleteResults,
+                onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                onEmotePicker = {
+                    onEmotePickerOpen()
+                    pickerOpen = true
+                },
+                insertEmoteRequest = pendingInsertion,
+                onInsertEmoteRequestConsumed = { pendingInsertion = null }
             )
         }
-
-        ChatInputBar(
-            enabled = canSend,
-            hint = hint,
-            message = state.sendErrorMessage,
-            messageIsError = state.sendErrorMessage != null,
-            onSend = onSend,
-            autocompleteResults = autocompleteResults,
-            onAutocompleteQueryChanged = onAutocompleteQueryChanged,
-            onEmotePicker = {
-                onEmotePickerOpen()
-                pickerOpen = true
-            },
-            insertEmoteRequest = pendingInsertion,
-            onInsertEmoteRequestConsumed = { pendingInsertion = null }
-        )
     }
 
     if (pickerOpen) {
@@ -183,6 +350,70 @@ fun ChatScreen(
                 )
                 pickerOpen = false
             }
+        )
+    }
+}
+
+private enum class ResizeHandleOrientation {
+    Horizontal,
+    Vertical
+}
+
+@Composable
+private fun ResizeHandle(
+    orientation: ResizeHandleOrientation,
+    onDrag: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(Twick.Bg)
+            .pointerInput(orientation) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    val delta = when (orientation) {
+                        ResizeHandleOrientation.Horizontal -> dragAmount.y
+                        ResizeHandleOrientation.Vertical -> dragAmount.x
+                    }
+                    onDrag(delta)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = when (orientation) {
+                ResizeHandleOrientation.Horizontal -> Modifier
+                    .width(54.dp)
+                    .height(3.dp)
+                ResizeHandleOrientation.Vertical -> Modifier
+                    .width(3.dp)
+                    .height(54.dp)
+            }
+                .background(Twick.Ink4.copy(alpha = 0.62f), RoundedCornerShape(999.dp))
+        )
+    }
+}
+
+@Composable
+private fun ChatMessagePane(
+    state: ChatUiState,
+    messages: List<com.example.chatterinomobile.data.model.ChatMessage>,
+    activeChannel: ActiveChannelState,
+    authLogin: String?,
+    focusManager: FocusManager,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clearComposerFocusOnTap(focusManager)
+    ) {
+        ChatList(
+            messages = messages,
+            deletedIds = state.deletedIds,
+            paintsByUserId = state.paintsByUserId,
+            showTimestamp = false,
+            modifier = Modifier.fillMaxSize(),
+            currentUserLogin = activeChannel.userState?.login ?: authLogin
         )
     }
 }
@@ -316,3 +547,15 @@ private fun com.example.chatterinomobile.data.model.UserChatState.canBypassSubsc
             id == "broadcaster" ||
             id == "vip"
     }
+
+private const val DEFAULT_VERTICAL_PLAYER_FRACTION = 0.32f
+private const val MIN_VERTICAL_PLAYER_FRACTION = 0.16f
+private const val MAX_VERTICAL_PLAYER_FRACTION = 0.72f
+private const val VERTICAL_HIDE_PLAYER_FRACTION = 0.08f
+private val VERTICAL_RESIZE_HANDLE_HEIGHT = 18.dp
+
+private const val DEFAULT_HORIZONTAL_PLAYER_FRACTION = 0.58f
+private const val MIN_THEATER_PLAYER_FRACTION = 0.24f
+private const val MAX_THEATER_PLAYER_FRACTION = 0.78f
+private const val THEATER_HIDE_PLAYER_FRACTION = 0.10f
+private val THEATER_RESIZE_HANDLE_WIDTH = 18.dp
