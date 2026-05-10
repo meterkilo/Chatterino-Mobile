@@ -121,9 +121,9 @@ fun ChatInputBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 9.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             IconCircle(
                 enabled = enabled,
@@ -139,14 +139,14 @@ fun ChatInputBar(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 36.dp)
-                    .background(Twick.S2, RoundedCornerShape(10.dp))
+                    .heightIn(min = 32.dp)
+                    .background(Twick.S2, RoundedCornerShape(8.dp))
                     .border(
                         width = 1.dp,
                         color = if (focused) Twick.Accent else Twick.Hairline,
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(8.dp)
                     )
-                    .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 20.dp)
+                    .padding(start = 10.dp, top = 6.dp, end = 10.dp, bottom = 15.dp)
             ) {
                 BasicTextField(
                     value = value,
@@ -162,10 +162,10 @@ fun ChatInputBar(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { submitMessage() }),
                     cursorBrush = SolidColor(Twick.Accent),
-                    textStyle = LocalTextStyle.current.copy(color = Twick.Ink, fontSize = 14.sp),
+                    textStyle = LocalTextStyle.current.copy(color = Twick.Ink, fontSize = 13.sp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(end = 58.dp)
+                        .padding(end = 52.dp)
                         .onFocusChanged { focused = it.isFocused }
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown &&
@@ -183,7 +183,7 @@ fun ChatInputBar(
                             Text(
                                 text = hint,
                                 color = Twick.Ink3,
-                                fontSize = 14.sp
+                                fontSize = 13.sp
                             )
                         }
                         inner()
@@ -192,17 +192,17 @@ fun ChatInputBar(
                 Text(
                     text = "${value.text.length}/$MAX_MESSAGE_LENGTH",
                     color = Twick.Ink4,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.BottomEnd)
                 )
             }
 
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(32.dp)
                     .background(
                         color = if (canSend) Twick.Accent else Twick.S2,
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(8.dp)
                     )
                     .clickable(enabled = canSend) { submitMessage() },
                 contentAlignment = Alignment.Center
@@ -271,7 +271,7 @@ private fun IconCircle(
 ) {
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(32.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content

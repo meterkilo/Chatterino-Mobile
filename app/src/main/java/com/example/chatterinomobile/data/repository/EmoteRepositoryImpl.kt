@@ -38,6 +38,8 @@ class EmoteRepositoryImpl(
 
     private var globalSortedIndex: List<IndexEntry> = emptyList()
     private val channelSortedIndex = HashMap<String, List<IndexEntry>>()
+    private var globalCatalogCache: EmoteCatalog? = null
+    private val channelCatalogCache = HashMap<String, EmoteCatalog>()
 
     private var globalLoadedAtMillis = 0L
     private val channelLoadedAtMillis = HashMap<String, Long>()
@@ -71,6 +73,9 @@ class EmoteRepositoryImpl(
     override fun listEmotesForChannel(channelId: String?): EmoteCatalog {
         if (channelId != null) {
             channelLastAccessedAtMillis[channelId] = System.currentTimeMillis()
+            channelCatalogCache[channelId]?.let { return it }
+        } else {
+            globalCatalogCache?.let { return it }
         }
 
         val merged = HashMap<String, Emote>(globalEmotesByName.size + 64)
@@ -84,11 +89,17 @@ class EmoteRepositoryImpl(
             merged.putAll(channelEmotes)
         }
 
-        return EmoteCatalog(
+        val catalog = EmoteCatalog(
             byProvider = groupByProvider(merged.values),
             globalByProvider = groupByProvider(globalEmotesByName.values),
             channelByProvider = groupByProvider(channelEmotes.values)
         )
+        if (channelId != null) {
+            channelCatalogCache[channelId] = catalog
+        } else {
+            globalCatalogCache = catalog
+        }
+        return catalog
     }
 
     private fun groupByProvider(emotes: Collection<Emote>): Map<EmoteProvider, List<Emote>> {
@@ -153,6 +164,7 @@ class EmoteRepositoryImpl(
             globalSortedIndex = emptyList()
             channelSortedIndex.clear()
             globalLoadedAtMillis = 0L
+            invalidateAllCatalogsLocked()
             return
         }
 
@@ -160,6 +172,7 @@ class EmoteRepositoryImpl(
         channelLoadedAtMillis.remove(channelId)
         channelLastAccessedAtMillis.remove(channelId)
         channelSortedIndex.remove(channelId)
+        invalidateChannelCatalogLocked(channelId)
     }
 
     private fun decorate(emote: Emote): Emote {
@@ -177,6 +190,7 @@ class EmoteRepositoryImpl(
                     globalEmotesByName.putAll(snapshot.emotes)
                     globalLoadedAtMillis = snapshot.savedAtEpochMillis
                     globalSortedIndex = buildIndex(globalEmotesByName.values)
+                    invalidateAllCatalogsLocked()
                 }
             }
         }
@@ -198,6 +212,7 @@ class EmoteRepositoryImpl(
             globalEmotesByName.putAll(loaded)
             globalLoadedAtMillis = System.currentTimeMillis()
             globalSortedIndex = buildIndex(globalEmotesByName.values)
+            invalidateAllCatalogsLocked()
         }
         diskCache.writeGlobal(loaded)
     }
@@ -213,6 +228,7 @@ class EmoteRepositoryImpl(
                     channelEmotesByChannelId[channelId] = map
                     channelLoadedAtMillis[channelId] = snapshot.savedAtEpochMillis
                     channelSortedIndex[channelId] = buildIndex(map.values)
+                    invalidateChannelCatalogLocked(channelId)
                 }
             }
         }
@@ -240,6 +256,7 @@ class EmoteRepositoryImpl(
                     channelEmotesByChannelId[channelId] = map
                     channelLoadedAtMillis[channelId] = System.currentTimeMillis()
                     channelSortedIndex[channelId] = buildIndex(map.values)
+                    invalidateChannelCatalogLocked(channelId)
                 }
                 diskCache.writeChannel(channelId, loaded)
             }
@@ -263,8 +280,10 @@ class EmoteRepositoryImpl(
         mutex.withLock {
             if (owningChannelId == null) {
                 globalEmotesByName[emote.name] = updated
+                invalidateAllCatalogsLocked()
             } else {
                 channelEmotesByChannelId[owningChannelId]?.put(emote.name, updated)
+                invalidateChannelCatalogLocked(owningChannelId)
             }
         }
         diskCache.patchEmote(owningChannelId, updated)
@@ -301,9 +320,19 @@ class EmoteRepositoryImpl(
                     channelLoadedAtMillis.remove(channelId)
                     channelLastAccessedAtMillis.remove(channelId)
                     channelSortedIndex.remove(channelId)
+                    invalidateChannelCatalogLocked(channelId)
                 }
             }
         }
+    }
+
+    private fun invalidateAllCatalogsLocked() {
+        globalCatalogCache = null
+        channelCatalogCache.clear()
+    }
+
+    private fun invalidateChannelCatalogLocked(channelId: String) {
+        channelCatalogCache.remove(channelId)
     }
 
     private fun mergeWithPrecedence(

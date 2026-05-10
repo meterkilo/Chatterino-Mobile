@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 
 data class DiscoveryUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val followedLive: List<Channel> = emptyList(),
     val followedLogins: List<String> = emptyList(),
     val knownChannels: List<Channel> = emptyList(),
@@ -56,7 +57,10 @@ class DiscoveryViewModel(
         load()
     }
 
-    fun refresh() = load()
+    fun refresh() {
+        load(showRefreshIndicator = true)
+        refreshActiveCategoryStreams()
+    }
 
     fun openSearch() {
         _uiState.update { it.copy(searchActive = true, searchQuery = "", searchResults = emptyList()) }
@@ -149,7 +153,7 @@ class DiscoveryViewModel(
         }
     }
 
-    private fun load() {
+    private fun load(showRefreshIndicator: Boolean = false) {
         viewModelScope.launch {
             try {
                 val userId = authRepository.getUserId()
@@ -162,6 +166,7 @@ class DiscoveryViewModel(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
+                            isRefreshing = showRefreshIndicator,
                             followedLive = snapshot.followedLive,
                             followedLogins = cachedLogins ?: it.followedLogins,
                             knownChannels = mergeChannels(it.knownChannels, snapshot.followedLive),
@@ -172,7 +177,13 @@ class DiscoveryViewModel(
                         )
                     }
                 } else {
-                    _uiState.update { it.copy(isLoading = true, error = null) }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = true,
+                            isRefreshing = showRefreshIndicator,
+                            error = null
+                        )
+                    }
                     if (cachedLogins != null) {
                         _uiState.update { it.copy(followedLogins = cachedLogins) }
                     }
@@ -180,7 +191,7 @@ class DiscoveryViewModel(
 
                 loadLiveAndRecommended(userId, cachedLogins, refreshFollows = true)
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false, error = e.message) }
             }
         }
     }
@@ -335,6 +346,7 @@ class DiscoveryViewModel(
             _uiState.update {
                 it.copy(
                     isLoading = false,
+                    isRefreshing = false,
                     followedLive = followedLive,
                     followedLogins = followedLogins,
                     knownChannels = mergeChannels(
@@ -447,11 +459,20 @@ class DiscoveryViewModel(
     private var categoryStreamsJob: Job? = null
 
     fun openCategory(category: Category) {
+        loadCategoryStreams(category, clearExisting = true)
+    }
+
+    private fun refreshActiveCategoryStreams() {
+        val category = _uiState.value.activeCategory ?: return
+        loadCategoryStreams(category, clearExisting = false)
+    }
+
+    private fun loadCategoryStreams(category: Category, clearExisting: Boolean) {
         categoryStreamsJob?.cancel()
         _uiState.update {
             it.copy(
                 activeCategory = category,
-                activeCategoryStreams = emptyList(),
+                activeCategoryStreams = if (clearExisting) emptyList() else it.activeCategoryStreams,
                 isLoadingCategoryStreams = true
             )
         }

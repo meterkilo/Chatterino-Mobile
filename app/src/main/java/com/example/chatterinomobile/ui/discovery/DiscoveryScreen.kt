@@ -59,6 +59,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -134,6 +136,13 @@ fun DiscoveryScreen(
                 onJoinChannel = { login ->
                     viewModel.closeSearch()
                     onJoinChannel(login)
+                },
+                isRefreshing = state.isRefreshing,
+                onRefresh = {
+                    viewModel.refresh()
+                    if (state.searchQuery.isNotBlank()) {
+                        viewModel.onSearchQueryChange(state.searchQuery)
+                    }
                 }
             )
             return@Column
@@ -169,7 +178,9 @@ fun DiscoveryScreen(
                             state = state,
                             onJoinChannel = onJoinChannel,
                             onOpenCategory = viewModel::openCategory,
-                            onCloseCategory = viewModel::closeCategory
+                            onCloseCategory = viewModel::closeCategory,
+                            isRefreshing = state.isRefreshing || state.isLoadingCategoryStreams,
+                            onRefresh = viewModel::refresh
                         )
                         2 -> YouBody(
                             onLogout = onLogout,
@@ -179,7 +190,9 @@ fun DiscoveryScreen(
                             state = state,
                             onJoinChannel = onJoinChannel,
                             onOpenCategory = viewModel::openCategory,
-                            onCloseCategory = viewModel::closeCategory
+                            onCloseCategory = viewModel::closeCategory,
+                            isRefreshing = state.isRefreshing || state.isLoadingCategoryStreams,
+                            onRefresh = viewModel::refresh
                         )
                     }
                 }
@@ -194,33 +207,42 @@ fun DiscoveryScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchBody(
     state: DiscoveryUiState,
     onQueryChange: (String) -> Unit,
     onClose: () -> Unit,
-    onJoinChannel: (String) -> Unit
+    onJoinChannel: (String) -> Unit,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        SearchBar(
-            query = state.searchQuery,
-            onQueryChange = onQueryChange,
-            onClose = onClose
-        )
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            SearchBar(
+                query = state.searchQuery,
+                onQueryChange = onQueryChange,
+                onClose = onClose
+            )
 
-        when {
-            state.searchQuery.isBlank() -> SearchEmptyText(text = "Search channels")
-            state.isSearching -> LoadingBody()
-            state.searchResults.isEmpty() -> SearchEmptyText(text = "No channels found")
-            else -> Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                state.searchResults.forEach { channel ->
-                    SearchResultRow(channel = channel, onClick = { onJoinChannel(channel.login) })
+            when {
+                state.searchQuery.isBlank() -> SearchEmptyText(text = "Search channels")
+                state.isSearching -> LoadingBody()
+                state.searchResults.isEmpty() -> SearchEmptyText(text = "No channels found")
+                else -> Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    state.searchResults.forEach { channel ->
+                        SearchResultRow(channel = channel, onClick = { onJoinChannel(channel.login) })
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
-                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -354,7 +376,7 @@ private fun SearchResultRow(channel: Channel, onClick: () -> Unit) {
                     color = if (channel.isLive) Color.White else Twick.Ink3,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = FontFamily.SansSerif,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .background(if (channel.isLive) Twick.Live else Twick.S2)
@@ -499,14 +521,21 @@ private fun FollowingBody(state: DiscoveryUiState, onJoinChannel: (String) -> Un
 
 private enum class PinnedKind { Channel, Chat }
 
+private enum class PinnedSortMode(val label: String) {
+    Recent("Recent"),
+    Viewers("Viewer count")
+}
+
 private data class PinnedItem(
     val kind: PinnedKind,
     val login: String,
     val name: String,
     val subtitle: String,
+    val pinnedIndex: Int,
     val message: String? = null,
     val platform: String? = "twitch",
     val isLive: Boolean = false,
+    val viewerCount: Int = 0,
     val viewers: String? = null,
     val imageUrl: String? = null,
     val unread: Int = 0,
@@ -523,31 +552,29 @@ private fun buildHomePinnedItems(state: DiscoveryUiState, pinnedChannelLogins: L
         .filter { it.isNotBlank() }
         .distinct()
         .mapIndexed { index, login ->
-            val item = channelsByLogin[login]?.toPinnedItem()
+            val item = channelsByLogin[login]?.toPinnedItem(index)
                 ?: PinnedItem(
                     kind = PinnedKind.Channel,
                     login = login,
                     name = login,
-                    subtitle = "Pinned Channels",
+                    subtitle = "OFFLINE",
+                    pinnedIndex = index,
                     isLive = false
                 )
-            index to item
+            item.copy(pinnedIndex = index)
         }
-        .sortedWith(
-            compareByDescending<Pair<Int, PinnedItem>> { it.second.isLive }
-                .thenBy { it.first }
-        )
-        .map { it.second }
 }
 
-private fun Channel.toPinnedItem(): PinnedItem =
+private fun Channel.toPinnedItem(pinnedIndex: Int = 0): PinnedItem =
     PinnedItem(
         kind = PinnedKind.Channel,
         login = login,
         name = displayName,
-        subtitle = if (isLive) gameName ?: "Live now" else "Pinned chat",
-        message = title,
+        subtitle = if (isLive) gameName ?: "Live now" else "OFFLINE",
+        pinnedIndex = pinnedIndex,
+        message = title.takeIf { isLive },
         isLive = isLive,
+        viewerCount = this.viewerCount,
         viewers = if (isLive) formatViewers(viewerCount) else null,
         imageUrl = profileImageUrl
     )
@@ -581,11 +608,25 @@ private fun HomeBody(
         .map { it.lowercase().removePrefix("#").trim() }
         .firstNotNullOfOrNull { login -> channelsByLogin[login]?.takeIf { it.isLive } }
     var selectedFilter by remember { mutableIntStateOf(0) }
-    val visiblePinnedItems = remember(pinnedItems, selectedFilter) {
-        when (selectedFilter) {
+    var selectedSortMode by remember { mutableStateOf(PinnedSortMode.Recent) }
+    val visiblePinnedItems = remember(pinnedItems, selectedFilter, selectedSortMode) {
+        val filtered = when (selectedFilter) {
             1 -> pinnedItems.filter { it.isLive }
             2 -> pinnedItems.filterNot { it.isLive }
             else -> pinnedItems
+        }
+        when (selectedSortMode) {
+            PinnedSortMode.Recent -> filtered.sortedWith(
+                compareByDescending<PinnedItem> { it.pinnedIndex }
+                    .thenByDescending { it.isLive }
+                    .thenBy { it.name.lowercase() }
+            )
+            PinnedSortMode.Viewers -> filtered.sortedWith(
+                compareByDescending<PinnedItem> { it.viewerCount }
+                    .thenByDescending { it.isLive }
+                    .thenByDescending { it.pinnedIndex }
+                    .thenBy { it.name.lowercase() }
+            )
         }
     }
     val liveCount = pinnedItems.count { it.isLive }
@@ -594,7 +635,7 @@ private fun HomeBody(
     val showFab = headerBottomContentPx > 0 && scrollState.value > headerBottomContentPx
 
     PullToRefreshBox(
-        isRefreshing = state.isLoading,
+        isRefreshing = state.isRefreshing,
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize()
     ) {
@@ -636,17 +677,10 @@ private fun HomeBody(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable {}
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Text(text = "Recent", color = Twick.Ink3, fontSize = 12.sp)
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Twick.Ink3, modifier = Modifier.size(14.dp))
-                }
+                PinnedSortMenu(
+                    selected = selectedSortMode,
+                    onSelected = { selectedSortMode = it }
+                )
             }
 
             if (pinnedItems.isEmpty()) {
@@ -755,6 +789,58 @@ private fun EmptyFilteredPinnedState() {
 }
 
 @Composable
+private fun PinnedSortMenu(
+    selected: PinnedSortMode,
+    onSelected: (PinnedSortMode) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(text = selected.label, color = Twick.Ink3, fontSize = 12.sp)
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = Twick.Ink3,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(Twick.S1)
+                .border(1.dp, Twick.Hairline, RoundedCornerShape(12.dp))
+        ) {
+            PinnedSortMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = mode.label,
+                            color = if (mode == selected) Twick.Ink else Twick.Ink2,
+                            fontSize = 13.sp,
+                            fontWeight = if (mode == selected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        onSelected(mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HomeHeader(liveCount: Int, savedCount: Int, onSearch: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
@@ -789,14 +875,14 @@ private fun HomeHeader(liveCount: Int, savedCount: Int, onSearch: () -> Unit, mo
                         text = "● $liveCount live",
                         color = Twick.Live,
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.SansSerif
                     )
-                    Text(text = " · ", color = Twick.Ink4, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(text = " · ", color = Twick.Ink4, fontSize = 11.sp, fontFamily = FontFamily.SansSerif)
                     Text(
                         text = "$savedCount saved",
                         color = Twick.Ink3,
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.SansSerif
                     )
                 }
             }
@@ -1137,14 +1223,14 @@ private fun PinnedRowInner(
                     color = if (item.isLive) Twick.Live else Twick.Ink4,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.SansSerif
                 )
                 if (item.scheduled != null) {
                     Text(
                         text = item.scheduled,
                         color = Twick.Ink3,
                         fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = FontFamily.SansSerif,
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(Twick.S2)
@@ -1178,7 +1264,7 @@ private fun PinnedRowInner(
                         color = Twick.Live,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.SansSerif
                     )
                 }
             }
@@ -1188,7 +1274,7 @@ private fun PinnedRowInner(
                     color = if (item.mention) Color.White else Twick.Ink2,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = FontFamily.SansSerif,
                     modifier = Modifier
                         .height(22.dp)
                         .clip(RoundedCornerShape(999.dp))
@@ -1263,7 +1349,7 @@ private fun HomeNowPlayingBar(channel: Channel, modifier: Modifier = Modifier) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("AUDIO", color = Twick.Ink3, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                    Text("AUDIO", color = Twick.Ink3, fontSize = 9.sp, fontFamily = FontFamily.SansSerif)
                 }
                 Text(
                     text = channel.title ?: channel.gameName ?: "@${channel.login}",
@@ -1431,12 +1517,15 @@ private fun PlaceholderBody(
 
 private enum class BrowseLayout { Grid, Large, Compact }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BrowseBody(
     state: DiscoveryUiState,
     onJoinChannel: (String) -> Unit,
     onOpenCategory: (Category) -> Unit,
-    onCloseCategory: () -> Unit
+    onCloseCategory: () -> Unit,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var layout by remember { mutableStateOf(BrowseLayout.Large) }
@@ -1450,7 +1539,9 @@ private fun BrowseBody(
             layout = layout,
             onLayoutToggle = { layout = nextBrowseLayout(layout) },
             onJoinChannel = onJoinChannel,
-            onBack = onCloseCategory
+            onBack = onCloseCategory,
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh
         )
         return
     }
@@ -1470,35 +1561,41 @@ private fun BrowseBody(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        BrowseTabBar(
-            selectedTab = selectedTab,
-            onTabSelected = { selectedTab = it },
-            layout = layout,
-            onLayoutToggle = { layout = nextBrowseLayout(layout) },
-            showLayoutToggle = showLayoutToggle
-        )
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize()
-        ) { page ->
-            when (page) {
-                0 -> BrowseChannelList(
-                    channels = sortedFollowedLive,
-                    layout = layout,
-                    emptyMessage = "No followed channels are live",
-                    onJoinChannel = onJoinChannel
-                )
-                1 -> BrowseChannelList(
-                    channels = state.topLiveStreams,
-                    layout = layout,
-                    emptyMessage = "No live channels available",
-                    onJoinChannel = onJoinChannel
-                )
-                else -> BrowseCategoriesGrid(
-                    categories = state.topCategories,
-                    onOpenCategory = onOpenCategory
-                )
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            BrowseTabBar(
+                selectedTab = selectedTab,
+                onTabSelected = { selectedTab = it },
+                layout = layout,
+                onLayoutToggle = { layout = nextBrowseLayout(layout) },
+                showLayoutToggle = showLayoutToggle
+            )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (page) {
+                    0 -> BrowseChannelList(
+                        channels = sortedFollowedLive,
+                        layout = layout,
+                        emptyMessage = "No followed channels are live",
+                        onJoinChannel = onJoinChannel
+                    )
+                    1 -> BrowseChannelList(
+                        channels = state.topLiveStreams,
+                        layout = layout,
+                        emptyMessage = "No live channels available",
+                        onJoinChannel = onJoinChannel
+                    )
+                    else -> BrowseCategoriesGrid(
+                        categories = state.topCategories,
+                        onOpenCategory = onOpenCategory
+                    )
+                }
             }
         }
     }
@@ -1684,6 +1781,7 @@ private fun CategoryGridCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryDetailBody(
     category: Category,
@@ -1692,95 +1790,104 @@ private fun CategoryDetailBody(
     layout: BrowseLayout,
     onLayoutToggle: () -> Unit,
     onJoinChannel: (String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Twick.Ink,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (category.boxArtUrl != null) {
-                    AsyncImage(
-                        model = category.boxArtUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(width = 36.dp, height = 48.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Twick.S2)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Twick.Ink,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = category.name,
-                        color = Twick.Ink,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (category.viewerCount > 0) {
-                        Text(
-                            text = "${formatViewers(category.viewerCount)} viewers",
-                            color = Twick.Ink3,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (category.boxArtUrl != null) {
+                        AsyncImage(
+                            model = category.boxArtUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(width = 36.dp, height = 48.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Twick.S2)
                         )
                     }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = category.name,
+                            color = Twick.Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (category.viewerCount > 0) {
+                            Text(
+                                text = "${formatViewers(category.viewerCount)} viewers",
+                                color = Twick.Ink3,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onLayoutToggle),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val icon = when (layout) {
+                        BrowseLayout.Grid -> Icons.Filled.GridView
+                        BrowseLayout.Large -> Icons.Filled.ViewAgenda
+                        BrowseLayout.Compact -> Icons.AutoMirrored.Filled.ViewList
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = "Change layout",
+                        tint = Twick.Ink2,
+                        modifier = Modifier
+                            .size(18.dp)
+                    )
                 }
             }
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onLayoutToggle),
-                contentAlignment = Alignment.Center
-            ) {
-                val icon = when (layout) {
-                    BrowseLayout.Grid -> Icons.Filled.GridView
-                    BrowseLayout.Large -> Icons.Filled.ViewAgenda
-                    BrowseLayout.Compact -> Icons.AutoMirrored.Filled.ViewList
-                }
-                Icon(
-                    imageVector = icon,
-                    contentDescription = "Change layout",
-                    tint = Twick.Ink2,
-                    modifier = Modifier.size(18.dp)
+            when {
+                isLoading && channels.isEmpty() -> LoadingBody()
+                channels.isEmpty() -> BrowseEmpty("No live streams in this category")
+                else -> BrowseChannelList(
+                    channels = channels,
+                    layout = layout,
+                    emptyMessage = "No live streams in this category",
+                    onJoinChannel = onJoinChannel
                 )
             }
-        }
-        when {
-            isLoading && channels.isEmpty() -> LoadingBody()
-            channels.isEmpty() -> BrowseEmpty("No live streams in this category")
-            else -> BrowseChannelList(
-                channels = channels,
-                layout = layout,
-                emptyMessage = "No live streams in this category",
-                onJoinChannel = onJoinChannel
-            )
         }
     }
 }
@@ -1896,7 +2003,7 @@ private fun BrowseChannelGrid(channels: List<Channel>, onJoinChannel: (String) -
                             color = Color.White,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.SansSerif
                         )
                     }
                 }
@@ -1966,7 +2073,7 @@ private fun BrowseChannelLargeList(channels: List<Channel>, onJoinChannel: (Stri
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.SansSerif
                         )
                     }
                 }
@@ -2134,7 +2241,7 @@ private fun BrowseChannelCompactList(channels: List<Channel>, onJoinChannel: (St
                         color = Twick.Ink2,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.SansSerif
                     )
                 }
             }
@@ -2409,7 +2516,7 @@ private fun StreamCard(channel: Channel, onClick: () -> Unit) {
                     color = Color.White,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.SansSerif
                 )
                 ViewerCountLabel(
                     count = channel.viewerCount,
@@ -2436,7 +2543,7 @@ private fun StreamCard(channel: Channel, onClick: () -> Unit) {
                         .clip(CircleShape)
                         .background(Twick.Twitch)
                 )
-                Text(text = "TWITCH", color = Twick.Ink, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text(text = "TWITCH", color = Twick.Ink, fontSize = 10.sp, fontFamily = FontFamily.SansSerif)
             }
         }
 
@@ -2535,7 +2642,7 @@ private fun LivePill(viewerText: String? = null) {
             color = Color.White,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace
+            fontFamily = FontFamily.SansSerif
         )
         if (viewerText != null) {
             Text(
@@ -2543,7 +2650,7 @@ private fun LivePill(viewerText: String? = null) {
                 color = Color.White,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
+                fontFamily = FontFamily.SansSerif
             )
         }
     }
@@ -2648,7 +2755,7 @@ private fun ViewerCountLabel(
             color = color,
             fontSize = fontSize.sp,
             fontWeight = fontWeight,
-            fontFamily = FontFamily.Monospace
+            fontFamily = FontFamily.SansSerif
         )
     }
 }

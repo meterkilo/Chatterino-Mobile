@@ -7,6 +7,8 @@ data class UserChatState(
     val color: String?,
     val badges: List<Badge>,
     val emoteSetIds: List<String>,
+    val isModerator: Boolean = false,
+    val isSubscriber: Boolean = false,
     val channelId: String? = null,
     val channelLogin: String? = null
 )

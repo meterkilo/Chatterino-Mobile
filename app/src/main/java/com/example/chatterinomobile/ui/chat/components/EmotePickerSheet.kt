@@ -83,7 +83,7 @@ fun EmotePickerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 248.dp, max = 392.dp)
-                .background(GlassSheet)
+                .background(Color.Transparent)
         ) {
             EmotePickerHeader()
             EmoteSearchField(
@@ -349,8 +349,8 @@ private fun scoreEmote(name: String, query: String, lowerQuery: String): Int {
 
 private const val MAX_SEARCH_RESULTS = 250
 
-private val GlassSheet = Color(0xCC101014)
-private val GlassPanel = Color(0x661C1C20)
-private val GlassCell = Color(0x5526262C)
-private val GlassStroke = Color(0x26FFFFFF)
-private val GlassAccent = Color(0x889146FF)
+private val GlassSheet = Color(0xAA101014)
+private val GlassPanel = Color(0x4A1C1C20)
+private val GlassCell = Color(0x3D26262C)
+private val GlassStroke = Color(0x1FFFFFFF)
+private val GlassAccent = Color(0x669146FF)

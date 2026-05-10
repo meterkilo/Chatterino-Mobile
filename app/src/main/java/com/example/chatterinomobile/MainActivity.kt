@@ -27,6 +27,7 @@ import com.example.chatterinomobile.ui.chat.ChatRoute
 import com.example.chatterinomobile.ui.chat.ChatViewModel
 import com.example.chatterinomobile.ui.discovery.DiscoveryScreen
 import com.example.chatterinomobile.ui.onboarding.OnboardingFlow
+import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
 import com.example.chatterinomobile.ui.settings.SettingsViewModel
 import com.example.chatterinomobile.ui.theme.ChatterinoMobileTheme
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -36,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModel()
     private val tabsViewModel: ChannelTabsViewModel by viewModel()
     private val chatViewModel: ChatViewModel by viewModel()
+    private val streamPlayerViewModel: StreamPlayerViewModel by viewModel()
     private val settingsViewModel: SettingsViewModel by viewModel()
 
     override fun onNewIntent(intent: Intent) {
@@ -125,6 +127,7 @@ class MainActivity : ComponentActivity() {
                                 ChatRoute(
                                     chatViewModel = chatViewModel,
                                     tabsViewModel = tabsViewModel,
+                                    streamPlayerViewModel = streamPlayerViewModel,
                                     isLoggedIn = authState.isLoggedIn,
                                     authUserId = authState.userId,
                                     authLogin = authState.login,

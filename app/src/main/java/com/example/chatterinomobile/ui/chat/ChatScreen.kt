@@ -1,11 +1,11 @@
 package com.example.chatterinomobile.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,9 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,8 @@ import com.example.chatterinomobile.ui.chat.components.ChatList
 import com.example.chatterinomobile.ui.chat.components.CompletionItem
 import com.example.chatterinomobile.ui.chat.components.EmoteInsertion
 import com.example.chatterinomobile.ui.chat.components.EmotePickerSheet
+import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
+import com.example.chatterinomobile.ui.player.TwitchStreamStage
 import com.example.chatterinomobile.ui.theme.Twick
 import coil.compose.AsyncImage
 
@@ -50,6 +53,7 @@ import coil.compose.AsyncImage
 fun ChatRoute(
     chatViewModel: ChatViewModel,
     tabsViewModel: ChannelTabsViewModel,
+    streamPlayerViewModel: StreamPlayerViewModel,
     isLoggedIn: Boolean,
     authUserId: String?,
     authLogin: String?,
@@ -69,6 +73,7 @@ fun ChatRoute(
         authLogin = authLogin,
         autocompleteState = autocompleteState,
         emoteCatalog = emoteCatalog,
+        streamPlayerViewModel = streamPlayerViewModel,
         onAutocompleteQueryChanged = { query ->
             chatViewModel.onAutocompleteQuery(
                 query = query,
@@ -79,6 +84,7 @@ fun ChatRoute(
         onEmotePickerOpen = chatViewModel::refreshEmoteCatalog,
         onSend = chatViewModel::sendMessage,
         onBack = {
+            streamPlayerViewModel.clear()
             chatViewModel.stopActiveChannel()
             tabsViewModel.stopActiveChannel()
             onBack()
@@ -87,6 +93,7 @@ fun ChatRoute(
 
     DisposableEffect(Unit) {
         onDispose {
+            streamPlayerViewModel.clear()
             chatViewModel.stopActiveChannel()
             tabsViewModel.stopActiveChannel()
         }
@@ -103,6 +110,7 @@ fun ChatScreen(
     authLogin: String?,
     autocompleteState: EmoteAutocompleteState,
     emoteCatalog: EmoteCatalog,
+    streamPlayerViewModel: StreamPlayerViewModel,
     onAutocompleteQueryChanged: (AutocompleteQuery?) -> Unit,
     onEmotePickerOpen: () -> Unit,
     onSend: (String) -> Unit,
@@ -110,6 +118,7 @@ fun ChatScreen(
 ) {
     val canSend = activeChannel.channelLogin != null && isLoggedIn
     val hint = composeHint(activeChannel, isLoggedIn)
+    val focusManager = LocalFocusManager.current
 
     var pickerOpen by remember { mutableStateOf(false) }
     var pendingInsertion by remember { mutableStateOf<EmoteInsertion?>(null) }
@@ -125,10 +134,17 @@ fun ChatScreen(
             .fillMaxSize()
             .background(Twick.Bg)
     ) {
-        VideoPlaceholder()
+        TwitchStreamStage(
+            activeChannel = activeChannel,
+            playerViewModel = streamPlayerViewModel
+        )
         StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
 
-        Box(modifier = Modifier.weight(1f)) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clearComposerFocusOnTap(focusManager)
+        ) {
             ChatList(
                 messages = messages,
                 deletedIds = state.deletedIds,
@@ -167,28 +183,6 @@ fun ChatScreen(
                 )
                 pickerOpen = false
             }
-        )
-    }
-}
-
-@Composable
-private fun VideoPlaceholder() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(Color(0xFF2A1F3D), Color(0xFF120A1F))
-                )
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "stream",
-            color = Color.White.copy(alpha = 0.2f),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
         )
     }
 }
@@ -286,18 +280,39 @@ private fun PartnerBadge(modifier: Modifier = Modifier) {
     )
 }
 
+private fun Modifier.clearComposerFocusOnTap(focusManager: FocusManager): Modifier =
+    pointerInput(focusManager) {
+        detectTapGestures(onTap = { focusManager.clearFocus(force = true) })
+    }
+
 private fun composeHint(active: ActiveChannelState, isLoggedIn: Boolean): String {
     val login = active.channelLogin ?: return "Join a channel"
     if (!isLoggedIn) return "Sign in to chat in $login"
-    val constraint = describeRoomConstraint(active.roomState)
+    val constraint = describeRoomConstraint(active.roomState, active.userState)
     return if (constraint == null) "Send a message" else "Send a message ($constraint)"
 }
 
-private fun describeRoomConstraint(room: RoomState?): String? {
+private fun describeRoomConstraint(
+    room: RoomState?,
+    userState: com.example.chatterinomobile.data.model.UserChatState?
+): String? {
     if (room == null) return null
-    if (room.subscribersOnly) return "Subscribers only"
+    if (room.subscribersOnly && userState?.canBypassSubscriberOnly() != true) {
+        return "Subscribers only"
+    }
     if (room.emoteOnly) return "Emotes only"
-    if (room.followersOnlyMinutes != null) return "Followers only"
+    if (room.followersOnlyMinutes != null && userState == null) return "Followers only"
     if (room.slowModeSeconds > 0) return "Slow mode (${room.slowModeSeconds}s)"
     return null
 }
+
+private fun com.example.chatterinomobile.data.model.UserChatState.canBypassSubscriberOnly(): Boolean =
+    isSubscriber || isModerator ||
+    badges.any { badge ->
+        val id = badge.id.substringBefore('/')
+        id == "subscriber" ||
+            id == "founder" ||
+            id == "moderator" ||
+            id == "broadcaster" ||
+            id == "vip"
+    }

@@ -171,7 +171,7 @@ private fun ProviderCard(
                     color = Color.Black,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.SansSerif
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -213,7 +213,7 @@ private fun StatusPill(status: ProviderStatus) {
                 text = "SYNCING",
                 color = Twick.Accent.copy(alpha = alpha),
                 fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = FontFamily.SansSerif,
                 letterSpacing = 0.6.sp
             )
         }
@@ -221,7 +221,7 @@ private fun StatusPill(status: ProviderStatus) {
             text = "SYNCED",
             color = Twick.Success,
             fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily.SansSerif,
             letterSpacing = 0.6.sp
         )
     }
@@ -258,7 +258,7 @@ private fun EmoteChip(code: String) {
             text = code.take(2),
             color = color,
             fontSize = 8.sp,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Bold
         )
     }

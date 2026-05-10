@@ -16,9 +16,11 @@
         android:theme="@style/Theme.ChatterinoMobile">
         <activity
             android:name=".MainActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="true"
             android:label="@string/title_activity_main"
             android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
             android:theme="@style/Theme.ChatterinoMobile">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -24,6 +24,7 @@ import com.example.chatterinomobile.data.repository.EmoteRepositoryImpl
 import com.example.chatterinomobile.data.repository.PaintRepository
 import com.example.chatterinomobile.data.repository.PaintRepositoryImpl
 import com.example.chatterinomobile.data.repository.TwitchOAuthRepository
+import com.example.chatterinomobile.data.repository.TwitchPlaybackRepository
 import org.koin.dsl.bind
 import org.koin.dsl.module
 
@@ -68,6 +69,7 @@ val repositoryModule = module {
     } bind BadgeRepository::class
     single { PaintRepositoryImpl(get(), get()) } bind PaintRepository::class
     single { ChannelRepositoryImpl(get()) } bind ChannelRepository::class
+    single { TwitchPlaybackRepository(get()) }
 
     single { CacheAdmin(get(), get(), get(), get(), get()) }
 

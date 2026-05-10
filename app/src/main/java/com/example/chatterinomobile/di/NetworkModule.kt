@@ -8,6 +8,7 @@ import com.example.chatterinomobile.data.remote.api.SevenTvApi
 import com.example.chatterinomobile.data.remote.api.SevenTvCosmeticsApi
 import com.example.chatterinomobile.data.remote.api.TwitchHelixApi
 import com.example.chatterinomobile.data.remote.api.TwitchOAuthApi
+import com.example.chatterinomobile.data.remote.api.TwitchPlaybackApi
 import com.example.chatterinomobile.data.remote.irc.IrcMessageMapper
 import com.example.chatterinomobile.data.remote.irc.MessageEnricher
 import com.example.chatterinomobile.data.remote.irc.ModerationEventMapper
@@ -57,6 +58,7 @@ val networkModule = module {
     single { SevenTvCosmeticsApi(get()) }
     single { TwitchOAuthApi(get()) }
     single { TwitchHelixApi(get(), get()) }
+    single { TwitchPlaybackApi(get()) }
 
     single { TwitchIrcClient(get(), get()) }
     single { IrcMessageMapper(get()) }

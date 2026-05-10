@@ -37,6 +37,8 @@ class UserStateMapper(
                 .orEmpty()
                 .split(',')
                 .mapNotNull { it.takeUnless(String::isBlank) },
+            isModerator = raw.tags["mod"] == "1",
+            isSubscriber = raw.tags["subscriber"] == "1",
             channelId = if (includeChannel) channelId else null,
             channelLogin = if (includeChannel) channelLogin else null
         )

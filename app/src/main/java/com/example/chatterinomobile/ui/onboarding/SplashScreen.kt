@@ -60,7 +60,7 @@ internal fun SplashScreen() {
                 text = "low-latency chat client",
                 color = Twick.Ink3,
                 fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace
+                fontFamily = FontFamily.SansSerif
             )
         }
 
@@ -97,7 +97,7 @@ private fun ConnectingPill(modifier: Modifier = Modifier) {
             text = "CONNECTING",
             color = Twick.Ink4,
             fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = FontFamily.SansSerif,
             letterSpacing = 1.sp
         )
     }

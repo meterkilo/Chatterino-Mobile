@@ -57,7 +57,7 @@ private val TimestampStyle: TextStyle
     get() = TextStyle(
         color = Twick.Ink4,
         fontSize = 11.sp,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = FontFamily.SansSerif,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
