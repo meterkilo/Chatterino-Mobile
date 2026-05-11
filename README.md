@@ -1,6 +1,6 @@
-# 7TV Mobile
+# 7TV Mobile / Twick Android Rewrite
 
-A native Android Twitch chat client with integrated live streaming, built for low-latency chat and polished UX. Inspired by **Chatterino** and **Chatterino7**, built with **Kotlin** and **Jetpack Compose**.
+A native Android Twitch viewer client with integrated live streaming, built for low-latency chat and polished UX. Inspired by **Chatterino** and **Chatterino7**, built with **Kotlin** and **Jetpack Compose**.
 
 ## Features
 
