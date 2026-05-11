@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chatterinomobile.ui.brand.HolographicSevenTvLogo
 import com.example.chatterinomobile.ui.theme.Twick
 
 @Composable
@@ -38,25 +39,15 @@ internal fun BrandMark(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(cornerRadius))
-            .background(Twick.PurpleGradient),
+            .background(Twick.S1),
         contentAlignment = Alignment.Center
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(glyphSize / 8)) {
-            Box(
-                modifier = Modifier
-                    .width(glyphSize / 4)
-                    .height(glyphSize)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White)
-            )
-            Box(
-                modifier = Modifier
-                    .width(glyphSize / 2.5f)
-                    .height(glyphSize)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White.copy(alpha = 0.92f))
-            )
-        }
+        HolographicSevenTvLogo(
+            size = glyphSize,
+            floating = false,
+            shimmer = true,
+            contentScale = 0.78f
+        )
     }
 }
 

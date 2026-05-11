@@ -1,8 +1,11 @@
 package com.example.chatterinomobile.ui.player
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -13,16 +16,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VideoLabel
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,10 +46,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,9 +84,26 @@ fun TwitchStreamStage(
     val playerState by playerViewModel.uiState.collectAsState()
 
     var fullscreen by rememberSaveable(channelLogin) { mutableStateOf(false) }
+    val activity = LocalActivity.current
 
     LaunchedEffect(channelLogin) {
         fullscreen = false
+    }
+
+    // Force landscape when theater/fullscreen is active; restore on exit.
+    DisposableEffect(fullscreen, theaterMode, activity) {
+        val act = activity as? Activity
+        if (act != null) {
+            act.requestedOrientation = if (fullscreen || theaterMode) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+        }
+        onDispose {
+            (activity as? Activity)?.requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     LaunchedEffect(channelLogin, isOffline, videoVisible) {
@@ -114,7 +141,15 @@ fun TwitchStreamStage(
                     playerState = playerState,
                     fullscreen = false,
                     theaterMode = theaterMode,
-                    onFullscreen = { fullscreen = true },
+                    onFullscreen = {
+                        // If currently in theater mode, exit theater and revert to vertical;
+                        // otherwise enter fullscreen.
+                        if (theaterMode) {
+                            onTheaterToggle?.invoke()
+                        } else {
+                            fullscreen = true
+                        }
+                    },
                     onTheaterToggle = onTheaterToggle,
                     onClose = {
                         onVideoVisibleChange?.invoke(false)
@@ -146,7 +181,12 @@ fun TwitchStreamStage(
                         playerState = playerState,
                         fullscreen = true,
                         theaterMode = theaterMode,
-                        onFullscreen = { fullscreen = false },
+                        onFullscreen = {
+                            // Exiting fullscreen: if we were also in theater mode,
+                            // drop out of theater too so we revert to the vertical layout.
+                            if (theaterMode) onTheaterToggle?.invoke()
+                            fullscreen = false
+                        },
                         onTheaterToggle = onTheaterToggle,
                         onClose = { fullscreen = false },
                         modifier = Modifier
@@ -185,6 +225,7 @@ private fun StreamPlayerFrame(
     var overlayVisible by remember(channelLogin) { mutableStateOf(true) }
     var overlayPulse by remember(channelLogin) { mutableStateOf(0) }
     val qualityState by playerViewModel.qualityState.collectAsState()
+    val muted by playerViewModel.muted.collectAsState()
     var qualityMenuOpen by remember(channelLogin) { mutableStateOf(false) }
 
     LaunchedEffect(channelLogin) {
@@ -256,6 +297,11 @@ private fun StreamPlayerFrame(
                 channelLogin = channelLogin,
                 fullscreen = fullscreen,
                 theaterMode = theaterMode,
+                muted = muted,
+                onMuteToggle = {
+                    playerViewModel.toggleMute()
+                    overlayPulse += 1
+                },
                 onFullscreen = onFullscreen,
                 onTheaterToggle = onTheaterToggle,
                 qualityState = qualityState,
@@ -340,7 +386,7 @@ private fun TwitchWebViewSurface(
                     webView.doOnAttach { view ->
                         view.postDelayed({
                             (view as? WebView)
-                                ?.evaluateJavascript("window.__chatterinoInitPlayback?.()", null)
+                                ?.evaluateJavascript("window.__7tvInitPlayback?.()", null)
                         }, RESUME_PLAYBACK_DELAY_MS)
                     }
                 }
@@ -377,6 +423,8 @@ private fun BoxScope.PlayerFocusOverlay(
     channelLogin: String,
     fullscreen: Boolean,
     theaterMode: Boolean,
+    muted: Boolean,
+    onMuteToggle: () -> Unit,
     onFullscreen: () -> Unit,
     onTheaterToggle: (() -> Unit)?,
     qualityState: VideoQualityState,
@@ -386,39 +434,128 @@ private fun BoxScope.PlayerFocusOverlay(
     onDismissQualityMenu: () -> Unit,
     onClose: () -> Unit
 ) {
-    // Top-left channel info — no background, just the text.
-    Column(
+    val displayName = channel.displayNameOrLogin(channelLogin)
+
+    // Top gradient — darkens the top edge so the avatar/metadata is legible.
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .height(96.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.65f),
+                        Color.Transparent
+                    )
+                )
+            )
+    )
+
+    // Bottom gradient — darkens the bottom edge behind the controls row.
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .height(72.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color.Black.copy(alpha = 0.65f)
+                    )
+                )
+            )
+    )
+
+    // Top-left channel info — tight rows, all white text.
+    Row(
         modifier = Modifier
             .align(Alignment.TopStart)
-            .padding(start = 12.dp, top = 8.dp, end = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+            .padding(start = 12.dp, top = 8.dp, end = 56.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        Text(
-            text = channel.displayNameOrLogin(channelLogin),
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(Twick.Accent),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!channel?.profileImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = channel?.profileImageUrl,
+                    contentDescription = displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text(
+                    text = displayName.firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayName,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (channel?.isPartner == true) {
+                    Icon(
+                        imageVector = Icons.Filled.Verified,
+                        contentDescription = "Partner",
+                        tint = Twick.Accent,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+            channel?.title?.takeIf { it.isNotBlank() }?.let { title ->
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if ((channel?.viewerCount ?: 0) > 0) {
+                Text(
+                    text = "${formatViewerCount(channel?.viewerCount ?: 0)} viewers",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+
+    // Top-right close button.
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(end = 6.dp, top = 6.dp)
+    ) {
+        StreamIconButton(
+            icon = Icons.Filled.Close,
+            contentDescription = "Close stream",
+            onClick = onClose
         )
-        channel?.title?.takeIf { it.isNotBlank() }?.let { title ->
-            Text(
-                text = title,
-                color = Twick.Ink2,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        if ((channel?.viewerCount ?: 0) > 0) {
-            Text(
-                text = "${formatViewerCount(channel?.viewerCount ?: 0)} viewers",
-                color = Twick.Ink3,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 
     // Outside-tap dismisser when the quality menu is open.
@@ -435,6 +572,7 @@ private fun BoxScope.PlayerFocusOverlay(
     }
 
     // Bottom-end controls — fully transparent toolbar.
+    // Order: Settings, Volume, [Theater if fullscreen or theater], Fullscreen.
     Box(
         modifier = Modifier
             .align(Alignment.BottomEnd)
@@ -451,7 +589,14 @@ private fun BoxScope.PlayerFocusOverlay(
                 selected = qualityMenuOpen,
                 onClick = onQualityClick
             )
-            if (onTheaterToggle != null && !fullscreen) {
+            StreamIconButton(
+                icon = if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (muted) "Unmute" else "Mute",
+                onClick = onMuteToggle
+            )
+            // Theater button: shown whenever the player is in fullscreen or
+            // already in theater mode (so the user can toggle it off).
+            if (onTheaterToggle != null && (fullscreen || theaterMode)) {
                 StreamIconButton(
                     icon = Icons.Filled.VideoLabel,
                     contentDescription = if (theaterMode) "Exit theater mode" else "Theater mode",
@@ -463,11 +608,6 @@ private fun BoxScope.PlayerFocusOverlay(
                 icon = if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                 contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
                 onClick = onFullscreen
-            )
-            StreamIconButton(
-                icon = Icons.Filled.Close,
-                contentDescription = "Close stream",
-                onClick = onClose
             )
         }
 

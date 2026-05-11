@@ -84,7 +84,7 @@ internal fun EmoteSyncScreen(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Twick fetches emote sets directly from each provider. " +
+                    text = "7TV Mobile fetches emote sets directly from each provider. " +
                             "Cached locally — no server in between.",
                     color = Twick.Ink3,
                     fontSize = 13.sp,

@@ -76,7 +76,7 @@ internal fun buildInlineContent(
         ) {
             Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 PaintedUsername(
-                    name = displayName,
+                    name = "$displayName:",
                     fallbackColor = authorColor,
                     paint = paint,
                     style = UsernameStyle,

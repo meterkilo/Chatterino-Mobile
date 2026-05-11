@@ -18,7 +18,7 @@ internal fun TwitchLogo(
     modifier: Modifier = Modifier
 ) {
     Image(
-        painter = painterResource(id = R.drawable.ic_twitch_logo),
+        painter = painterResource(id = R.drawable.ic_twitch_logo_new),
         contentDescription = "Twitch",
         modifier = modifier.size(size),
         colorFilter = if (tint == Color.Unspecified) null else ColorFilter.tint(tint)

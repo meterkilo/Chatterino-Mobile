@@ -1,5 +1,6 @@
 package com.example.chatterinomobile.ui.discovery
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -58,6 +59,8 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -78,6 +81,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -91,6 +96,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -102,6 +109,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.chatterinomobile.data.model.Category
 import com.example.chatterinomobile.data.model.Channel
+import com.example.chatterinomobile.ui.brand.HolographicSevenTvWordmark
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlin.math.roundToInt
 import org.koin.androidx.compose.koinViewModel
@@ -2258,41 +2266,7 @@ private fun DiscoveryTopBar(onSearch: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Twick.PurpleGradient),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .width(4.dp)
-                            .height(14.dp)
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(Color.White)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .width(6.dp)
-                            .height(14.dp)
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(Color.White.copy(alpha = 0.92f))
-                    )
-                }
-            }
-            Text(
-                text = "twick",
-                color = Twick.Ink,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        HolographicSevenTvWordmark()
 
         Row {
             TopBarIconButton(icon = Icons.Filled.Search, onClick = onSearch)
@@ -2315,8 +2289,14 @@ private fun TopBarIconButton(icon: androidx.compose.ui.graphics.vector.ImageVect
 
 private data class BottomDestination(
     val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
+    val icon: BottomNavIcon
 )
+
+private enum class BottomNavIcon {
+    Home,
+    Browse,
+    You
+}
 
 @Composable
 private fun DiscoveryBottomBar(
@@ -2325,22 +2305,19 @@ private fun DiscoveryBottomBar(
     modifier: Modifier = Modifier
 ) {
     val tabs = listOf(
-        BottomDestination("Home", Icons.Filled.Home),
-        BottomDestination("Browse", Icons.Filled.Explore),
-        BottomDestination("You", Icons.Filled.Person)
+        BottomDestination("Home", BottomNavIcon.Home),
+        BottomDestination("Browse", BottomNavIcon.Browse),
+        BottomDestination("You", BottomNavIcon.You)
     )
-    // Full-width gradient strip that fades from transparent into the page bg.
-    // The gradient sits in the upper portion; icons live in the solid black band below.
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(150.dp)
+            .height(132.dp)
     ) {
-        // Gradient fade — top half only.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(80.dp)
+                .height(42.dp)
                 .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
@@ -2348,11 +2325,10 @@ private fun DiscoveryBottomBar(
                     )
                 )
         )
-        // Solid black band where the icons live.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(70.dp)
+                .height(92.dp)
                 .align(Alignment.BottomCenter)
                 .background(Twick.Bg)
         )
@@ -2361,27 +2337,86 @@ private fun DiscoveryBottomBar(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(start = 26.dp, end = 26.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEachIndexed { idx, destination ->
                 val isActive = idx == activeTab
+                val tint = if (isActive) Twick.Ink else Twick.Ink4.copy(alpha = 0.88f)
                 Box(
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .clickable { onTabSelected(idx) },
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onTabSelected(idx) }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = destination.icon,
+                    BottomBarIcon(
+                        icon = destination.icon,
                         contentDescription = destination.label,
-                        tint = if (isActive) Twick.Ink else Twick.Ink4,
-                        modifier = Modifier.size(if (isActive) 26.dp else 24.dp)
+                        tint = tint
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BottomBarIcon(
+    icon: BottomNavIcon,
+    contentDescription: String,
+    tint: Color
+) {
+    when (icon) {
+        BottomNavIcon.Home -> Icon(
+            imageVector = Icons.Filled.Home,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(31.dp)
+        )
+        BottomNavIcon.Browse -> Icon(
+            imageVector = Icons.Filled.Explore,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(26.dp)
+        )
+        BottomNavIcon.You -> Icon(
+            imageVector = Icons.Filled.Person,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(26.dp)
+        )
+    }
+}
+
+@Composable
+private fun CoinStackIcon(
+    contentDescription: String,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier.semantics {
+            this.contentDescription = contentDescription
+        }
+    ) {
+        val stroke = size.minDimension * 0.105f
+        val coinHeight = size.height * 0.25f
+        val coinWidth = size.width * 0.76f
+        val left = (size.width - coinWidth) / 2f
+        val centers = listOf(0.24f, 0.48f, 0.72f).map { size.height * it }
+
+        centers.forEach { centerY ->
+            drawOval(
+                color = tint,
+                topLeft = Offset(left, centerY - coinHeight / 2f),
+                size = Size(coinWidth, coinHeight),
+                style = Stroke(width = stroke)
+            )
         }
     }
 }

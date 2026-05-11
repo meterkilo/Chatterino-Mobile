@@ -47,7 +47,7 @@ internal fun SplashScreen() {
             Spacer(Modifier.height(20.dp))
 
             Text(
-                text = "chatterino",
+                text = "7TV Mobile",
                 color = Twick.Ink,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,

@@ -20,12 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -138,6 +140,15 @@ fun ChatScreen(
     var horizontalPlayerFraction by remember(activeChannel.channelLogin) {
         mutableStateOf(DEFAULT_HORIZONTAL_PLAYER_FRACTION)
     }
+    val channelIsKnownOffline = activeChannel.channel?.isLive == false
+
+    LaunchedEffect(activeChannel.channelLogin, channelIsKnownOffline) {
+        if (channelIsKnownOffline) {
+            theaterMode = false
+            chatFullscreen = false
+            streamPlayerViewModel.stopPlayback()
+        }
+    }
 
     fun enterChatFullscreen() {
         videoVisible = false
@@ -152,7 +163,9 @@ fun ChatScreen(
         theaterMode = false
         verticalPlayerFraction = DEFAULT_VERTICAL_PLAYER_FRACTION
         horizontalPlayerFraction = DEFAULT_HORIZONTAL_PLAYER_FRACTION
-        activeChannel.channelLogin?.let(streamPlayerViewModel::playChannel)
+        if (!channelIsKnownOffline) {
+            activeChannel.channelLogin?.let(streamPlayerViewModel::playChannel)
+        }
     }
 
     BackHandler(enabled = chatFullscreen) {
@@ -170,8 +183,18 @@ fun ChatScreen(
             .fillMaxSize()
             .background(Twick.Bg)
     ) {
-        if (chatFullscreen || !videoVisible) {
-            StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
+        if (chatFullscreen || !videoVisible || channelIsKnownOffline) {
+            // Player is removed: show the diagonal "restore player" arrow when
+            // we can bring the player back (live channel, currently removed).
+            // Offline channels can't restore — fall back to a plain back arrow.
+            val canRestorePlayer = !channelIsKnownOffline &&
+                (chatFullscreen || !videoVisible) &&
+                activeChannel.channelLogin != null
+            StreamerMetaRow(
+                activeChannel = activeChannel,
+                onBack = if (canRestorePlayer) ({ restoreDefaultPlayer() }) else onBack,
+                restorePlayerMode = canRestorePlayer
+            )
             ChatMessagePane(
                 state = state,
                 messages = messages,
@@ -196,7 +219,6 @@ fun ChatScreen(
                 onInsertEmoteRequestConsumed = { pendingInsertion = null }
             )
         } else if (theaterMode && activeChannel.channelLogin != null) {
-            StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
@@ -242,6 +264,7 @@ fun ChatScreen(
                             .width(chatWidth.coerceAtLeast(0.dp))
                             .fillMaxHeight()
                     ) {
+                        ChatBackBar(onBack = onBack)
                         ChatMessagePane(
                             state = state,
                             messages = messages,
@@ -293,7 +316,6 @@ fun ChatScreen(
                             .fillMaxWidth()
                             .height(playerHeight.coerceAtLeast(0.dp))
                     )
-                    StreamerMetaRow(activeChannel = activeChannel, onBack = onBack)
                     ResizeHandle(
                         orientation = ResizeHandleOrientation.Horizontal,
                         modifier = Modifier
@@ -311,6 +333,7 @@ fun ChatScreen(
                             }
                         }
                     )
+                    ChatBackBar(onBack = onBack)
                     ChatMessagePane(
                         state = state,
                         messages = messages,
@@ -419,9 +442,31 @@ private fun ChatMessagePane(
 }
 
 @Composable
+private fun ChatBackBar(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Twick.Ink2
+            )
+        }
+    }
+}
+
+@Composable
 private fun StreamerMetaRow(
     activeChannel: ActiveChannelState,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    restorePlayerMode: Boolean = false
 ) {
     val login = activeChannel.channel?.displayName ?: activeChannel.channelLogin
     val profileImageUrl = activeChannel.channel?.profileImageUrl
@@ -437,8 +482,12 @@ private fun StreamerMetaRow(
     ) {
         IconButton(onClick = onBack) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
+                imageVector = if (restorePlayerMode) {
+                    Icons.Filled.NorthWest
+                } else {
+                    Icons.AutoMirrored.Filled.ArrowBack
+                },
+                contentDescription = if (restorePlayerMode) "Restore player" else "Back",
                 tint = Twick.Ink2
             )
         }

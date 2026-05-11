@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ChatterinoMobile"
+rootProject.name = "7TVMobile"
 include(":app")

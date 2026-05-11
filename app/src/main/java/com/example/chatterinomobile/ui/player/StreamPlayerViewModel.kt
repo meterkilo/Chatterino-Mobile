@@ -40,6 +40,9 @@ class StreamPlayerViewModel(
     private val _qualityState = MutableStateFlow(VideoQualityState())
     val qualityState = _qualityState.asStateFlow()
 
+    private val _muted = MutableStateFlow(false)
+    val muted = _muted.asStateFlow()
+
     @SuppressLint("StaticFieldLeak")
     private var cachedWebView: TwitchStreamWebView? = null
 
@@ -109,7 +112,7 @@ class StreamPlayerViewModel(
         nativeLoadJob?.cancel()
         nativePlayer?.pause()
         cachedWebView?.evaluateJavascript(
-            "(window.__chatterinoVideoEl || document.querySelector('video'))?.pause()",
+            "(window.__7tvVideoEl || document.querySelector('video'))?.pause()",
             null
         )
     }
@@ -216,7 +219,7 @@ class StreamPlayerViewModel(
 
     private fun stopEmbedPlayback() {
         cachedWebView?.evaluateJavascript(
-            "(window.__chatterinoVideoEl || document.querySelector('video'))?.pause()",
+            "(window.__7tvVideoEl || document.querySelector('video'))?.pause()",
             null
         )
     }
@@ -255,6 +258,7 @@ class StreamPlayerViewModel(
             .build()
 
         player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        player.volume = if (_muted.value) 0f else 1f
         player.addListener(
             object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
@@ -313,6 +317,20 @@ class StreamPlayerViewModel(
             options = options,
             selectedTrackIndex = if (isAuto) null else selectedIndex.takeIf { it >= 0 },
             isAuto = isAuto
+        )
+    }
+
+    fun toggleMute() {
+        setMuted(!_muted.value)
+    }
+
+    fun setMuted(muted: Boolean) {
+        _muted.value = muted
+        nativePlayer?.volume = if (muted) 0f else 1f
+        cachedWebView?.evaluateJavascript(
+            "(window.__7tvVideoEl || document.querySelector('video')) && " +
+                "((window.__7tvVideoEl || document.querySelector('video')).muted = $muted)",
+            null
         )
     }
 
@@ -382,7 +400,7 @@ class StreamPlayerViewModel(
 
     private companion object {
         const val TWITCH_EMBED_PARENT = "twitch.tv"
-        const val USER_AGENT = "ChatterinoMobile"
+        const val USER_AGENT = "7TVMobile"
         const val LIVE_TARGET_OFFSET_MS = 2_500L
         const val LIVE_MIN_PLAYBACK_SPEED = 0.97f
         const val LIVE_MAX_PLAYBACK_SPEED = 1.03f
@@ -394,12 +412,12 @@ class StreamPlayerViewModel(
         const val AD_SEGMENT_SKIP_DELAY_MS = 500L
         const val INIT_EMBED_PLAYBACK_SCRIPT = """
             (() => {
-              if (window.__chatterinoInitPlayback) {
-                window.__chatterinoInitPlayback();
+              if (window.__7tvInitPlayback) {
+                window.__7tvInitPlayback();
                 return;
               }
 
-              window.__chatterinoWaitFor = (selector, timeout = 10000) => new Promise((resolve) => {
+              window.__7tvWaitFor = (selector, timeout = 10000) => new Promise((resolve) => {
                 const existing = document.querySelector(selector);
                 if (existing) {
                   resolve(existing);
@@ -423,11 +441,11 @@ class StreamPlayerViewModel(
                 }, timeout);
               });
 
-              window.__chatterinoInitPlayback = async () => {
-                const video = await window.__chatterinoWaitFor('video');
+              window.__7tvInitPlayback = async () => {
+                const video = await window.__7tvWaitFor('video');
                 if (!video) return;
 
-                window.__chatterinoVideoEl = video;
+                window.__7tvVideoEl = video;
                 video.setAttribute('playsinline', '');
                 video.muted = false;
                 video.volume = 1.0;
@@ -444,7 +462,7 @@ class StreamPlayerViewModel(
                 }
               };
 
-              window.__chatterinoInitPlayback();
+              window.__7tvInitPlayback();
             })();
         """
     }

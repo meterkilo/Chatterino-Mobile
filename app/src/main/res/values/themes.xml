@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.ChatterinoMobile" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.SevenTVMobile" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.SevenTVMobile.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0B0D10</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/avd_splash_7tv_holographic</item>
+        <item name="windowSplashScreenAnimationDuration">1200</item>
+        <item name="postSplashScreenTheme">@style/Theme.SevenTVMobile</item>
+    </style>
 </resources>

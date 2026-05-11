@@ -220,10 +220,8 @@ private fun MessageBody(
             }
 
         appendInlineContent(USERNAME_ID, author.displayName)
-        if (isAction) {
+        if (!isAction) {
             append(" ")
-        } else {
-            append(": ")
         }
 
             if (deleted) {

@@ -60,7 +60,7 @@ internal fun ConnectTwitchScreen(
                 Spacer(Modifier.height(6.dp))
 
                 Text(
-                    text = "Twick never stores your credentials on our servers. " +
+                    text = "7TV Mobile never stores your credentials on our servers. " +
                             "You'll authenticate directly with Twitch and we keep the token on-device.",
                     color = Twick.Ink3,
                     fontSize = 13.sp,
