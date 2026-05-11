@@ -31,7 +31,7 @@ A native Android Twitch viewer client with integrated live streaming, built for 
 |-----------|------------|
 | **UI Framework** | Jetpack Compose + Material3 |
 | **Video Playback** | Media3 (ExoPlayer 1.10) with HLS |
-| **Chat & Networking** | Ktor HTTP client, OkHttp, Scarlet WebSocket |
+| **Chat & Networking** | Ktor HTTP client + WebSocket, OkHttp |
 | **Reactive** | Kotlin Coroutines + Flow (StateFlow, SharedFlow) |
 | **Serialization** | kotlinx.serialization (JSON) |
 | **Dependency Injection** | Koin |
