@@ -22,10 +22,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 
 @Composable
@@ -60,7 +60,7 @@ internal fun SplashScreen() {
                 text = "low-latency chat client",
                 color = Twick.Ink3,
                 fontSize = 12.sp,
-                fontFamily = FontFamily.SansSerif
+                fontFamily = PublicSansFontFamily
             )
         }
 
@@ -97,7 +97,7 @@ private fun ConnectingPill(modifier: Modifier = Modifier) {
             text = "CONNECTING",
             color = Twick.Ink4,
             fontSize = 10.sp,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = PublicSansFontFamily,
             letterSpacing = 1.sp
         )
     }

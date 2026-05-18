@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.chatterinomobile.data.model.ChatMessage
 import com.example.chatterinomobile.data.model.Emote
+import com.example.chatterinomobile.data.model.MessageFragment
+import com.example.chatterinomobile.data.model.MessageType
 import com.example.chatterinomobile.data.model.ModerationEvent
 import com.example.chatterinomobile.data.model.Paint
 import com.example.chatterinomobile.data.model.ReplyMetadata
@@ -102,6 +104,7 @@ class ChatViewModel(
                 activeChannelId = channelId,
                 deletedIds = if (isChannelSwitch) persistentHashSetOf() else deletedIds,
                 bannedLogins = if (isChannelSwitch) persistentHashSetOf() else bannedLogins,
+                pendingReply = if (isChannelSwitch) null else pendingReply,
                 sendStatusMessage = null,
                 sendErrorMessage = null
             )
@@ -132,10 +135,32 @@ class ChatViewModel(
                 activeChannelId = null,
                 deletedIds = persistentHashSetOf(),
                 bannedLogins = persistentHashSetOf(),
+                pendingReply = null,
                 sendStatusMessage = null,
                 sendErrorMessage = null
             )
         }
+    }
+
+    fun beginReply(message: ChatMessage) {
+        if (message.Type is MessageType.System) return
+        update {
+            copy(
+                pendingReply = ReplyMetadata(
+                    parentMessageId = message.id,
+                    parentUserId = message.author.id,
+                    parentUserLogin = message.author.login,
+                    parentDisplayName = message.author.displayName,
+                    parentBody = message.fragment.toPlainText().take(MAX_REPLY_PREVIEW_LENGTH)
+                ),
+                sendStatusMessage = null,
+                sendErrorMessage = null
+            )
+        }
+    }
+
+    fun cancelReply() {
+        update { copy(pendingReply = null) }
     }
 
     fun sendMessage(text: String) {
@@ -146,9 +171,9 @@ class ChatViewModel(
         }
 
         viewModelScope.launch {
-            when (val result = chatRepository.sendMessage(active, text)) {
+            when (val result = chatRepository.sendMessage(active, text, state.pendingReply?.parentMessageId)) {
                 SendMessageResult.Sent -> update {
-                    copy(sendStatusMessage = null, sendErrorMessage = null)
+                    copy(pendingReply = null, sendStatusMessage = null, sendErrorMessage = null)
                 }
                 SendMessageResult.EmptyMessage -> update {
                     copy(sendErrorMessage = "Message cannot be empty.")
@@ -209,10 +234,16 @@ class ChatViewModel(
     }
 
     private fun appendMessage(message: ChatMessage) {
-        if (recentMessages.size >= MAX_RECENT_MESSAGES) {
+        if (recentMessages.any { it.id == message.id }) return
+
+        val insertIndex = recentMessages.indexOfFirst { it.timestamp > message.timestamp }
+            .takeIf { it >= 0 }
+            ?: recentMessages.size
+        recentMessages.add(insertIndex, message)
+
+        if (recentMessages.size > MAX_RECENT_MESSAGES) {
             recentMessages.removeAt(0)
         }
-        recentMessages.add(message)
     }
 
     private inline fun update(transform: ChatUiState.() -> ChatUiState) {
@@ -221,6 +252,15 @@ class ChatViewModel(
 
     private fun ChatMessage.belongsTo(activeLogin: String, activeId: String?): Boolean =
         channelId == activeLogin || (activeId != null && channelId == activeId)
+
+    private fun List<MessageFragment>.toPlainText(): String =
+        joinToString(separator = "") { fragment ->
+            when (fragment) {
+                is MessageFragment.Text -> fragment.content
+                is MessageFragment.Emote -> fragment.name
+                is MessageFragment.Mention -> "@${fragment.username}"
+            }
+        }.trim()
 
     private fun searchUserSuggestions(
         query: String,
@@ -293,6 +333,7 @@ class ChatViewModel(
         private const val MIN_AUTOCOMPLETE_QUERY_LEN = 1
         private const val AUTOCOMPLETE_LIMIT = 30
         private const val USER_AUTOCOMPLETE_LIMIT = 30
+        private const val MAX_REPLY_PREVIEW_LENGTH = 140
     }
 }
 
@@ -303,6 +344,7 @@ data class ChatUiState(
     val deletedIds: PersistentSet<String> = persistentHashSetOf(),
     val bannedLogins: PersistentSet<String> = persistentHashSetOf(),
     val paintsByUserId: PersistentMap<String, Paint> = persistentHashMapOf(),
+    val pendingReply: ReplyMetadata? = null,
     val sendStatusMessage: String? = null,
     val sendErrorMessage: String? = null
 )

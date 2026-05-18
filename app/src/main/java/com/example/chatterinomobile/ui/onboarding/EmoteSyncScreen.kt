@@ -35,10 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlinx.coroutines.delay
 
@@ -171,7 +171,7 @@ private fun ProviderCard(
                     color = Color.Black,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.SansSerif
+                    fontFamily = PublicSansFontFamily
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -213,7 +213,7 @@ private fun StatusPill(status: ProviderStatus) {
                 text = "SYNCING",
                 color = Twick.Accent.copy(alpha = alpha),
                 fontSize = 10.sp,
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PublicSansFontFamily,
                 letterSpacing = 0.6.sp
             )
         }
@@ -221,7 +221,7 @@ private fun StatusPill(status: ProviderStatus) {
             text = "SYNCED",
             color = Twick.Success,
             fontSize = 10.sp,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = PublicSansFontFamily,
             letterSpacing = 0.6.sp
         )
     }
@@ -258,7 +258,7 @@ private fun EmoteChip(code: String) {
             text = code.take(2),
             color = color,
             fontSize = 8.sp,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = PublicSansFontFamily,
             fontWeight = FontWeight.Bold
         )
     }

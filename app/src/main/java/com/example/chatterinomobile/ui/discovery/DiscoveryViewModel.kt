@@ -77,10 +77,17 @@ class DiscoveryViewModel(
             .filter { it.isNotBlank() }
             .distinct()
         if (normalized.isEmpty()) return
+        val knownLogins = _uiState.value.knownChannels
+            .map { it.login.lowercase() }
+            .toSet()
+        val missing = normalized.filterNot { it in knownLogins }
+        if (missing.isEmpty()) return
 
         pinnedChannelsJob?.cancel()
         pinnedChannelsJob = viewModelScope.launch {
-            val channels = runCatching { fetchChannelsByLogin(normalized) }
+            // Let the cached discovery snapshot render first; pinned metadata is nice-to-have.
+            delay(PINNED_HYDRATION_DELAY_MILLIS)
+            val channels = runCatching { fetchChannelsByLogin(missing) }
                 .getOrElse { error ->
                     if (error is CancellationException) throw error
                     emptyList()
@@ -160,7 +167,11 @@ class DiscoveryViewModel(
                 val userKey = userId ?: ANON_KEY
 
                 val snapshot = snapshotCache.read(userKey)
-                val cachedLogins = if (userId != null) followListCache.read(userId)?.logins else null
+                val followSnapshot = if (userId != null) followListCache.read(userId) else null
+                val cachedLogins = followSnapshot?.logins
+                val shouldRefreshFollows = userId != null &&
+                    (cachedLogins == null ||
+                        System.currentTimeMillis() - followSnapshot.savedAtEpochMillis >= FOLLOW_LIST_TTL_MILLIS)
 
                 if (snapshot != null) {
                     _uiState.update {
@@ -189,7 +200,17 @@ class DiscoveryViewModel(
                     }
                 }
 
-                loadLiveAndRecommended(userId, cachedLogins, refreshFollows = true)
+                if (snapshot != null && !showRefreshIndicator) {
+                    // Keep startup smooth: paint cached data immediately, then do a small live refresh.
+                    delay(BACKGROUND_REFRESH_DELAY_MILLIS)
+                }
+
+                loadLiveAndRecommended(
+                    userId = userId,
+                    logins = cachedLogins,
+                    refreshFollows = showRefreshIndicator || shouldRefreshFollows,
+                    includeExpensiveCategoryCounts = showRefreshIndicator || snapshot == null
+                )
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, isRefreshing = false, error = e.message) }
             }
@@ -199,7 +220,8 @@ class DiscoveryViewModel(
     private suspend fun loadLiveAndRecommended(
         userId: String?,
         logins: List<String>?,
-        refreshFollows: Boolean
+        refreshFollows: Boolean,
+        includeExpensiveCategoryCounts: Boolean
     ) {
         coroutineScope {
             val freshFollowsDeferred = if (refreshFollows && userId != null) {
@@ -270,7 +292,7 @@ class DiscoveryViewModel(
             } else emptyList()
 
             val followedLoginSet = followedLogins.toSet()
-            val followedChannels = if (followedLogins.isNotEmpty()) {
+            val followedChannels = if (followedLogins.isNotEmpty() && (refreshFollows || logins == null)) {
                 runCatching { fetchChannelsByLogin(followedLogins) }
                     .getOrElse { error ->
                         if (error is CancellationException) throw error
@@ -317,20 +339,25 @@ class DiscoveryViewModel(
                 .mapValues { (_, list) -> list.sumOf { it.viewerCount } }
 
             val topGames = topGamesDeferred.await()
-            val sampledViewersByGameId = topGames
-                .map { game ->
-                    async {
-                        val streams = runCatching {
-                            fetchCategoryStreams(game.id, CATEGORY_COUNT_STREAM_SAMPLE)
-                        }.getOrElse { error ->
-                            if (error is CancellationException) throw error
-                            emptyList()
+            val sampledViewersByGameId = if (includeExpensiveCategoryCounts) {
+                topGames
+                    .take(CATEGORY_COUNT_SAMPLE_GAME_LIMIT)
+                    .map { game ->
+                        async {
+                            val streams = runCatching {
+                                fetchCategoryStreams(game.id, CATEGORY_COUNT_STREAM_SAMPLE)
+                            }.getOrElse { error ->
+                                if (error is CancellationException) throw error
+                                emptyList()
+                            }
+                            game.id to streams.sumOf { it.viewerCount }
                         }
-                        game.id to streams.sumOf { it.viewerCount }
                     }
-                }
-                .awaitAll()
-                .toMap()
+                    .awaitAll()
+                    .toMap()
+            } else {
+                emptyMap()
+            }
 
             val topCategories = topGames.map { game ->
                 Category(
@@ -555,7 +582,11 @@ class DiscoveryViewModel(
     companion object {
         private const val MAX_FOLLOWS = 1000
         private const val CATEGORY_COUNT_STREAM_SAMPLE = 100
+        private const val CATEGORY_COUNT_SAMPLE_GAME_LIMIT = 6
         private const val CATEGORY_DETAIL_STREAM_LIMIT = 100
+        private const val FOLLOW_LIST_TTL_MILLIS = 30 * 60 * 1000L
+        private const val BACKGROUND_REFRESH_DELAY_MILLIS = 350L
+        private const val PINNED_HYDRATION_DELAY_MILLIS = 500L
         private const val ANON_KEY = "anon"
     }
 }

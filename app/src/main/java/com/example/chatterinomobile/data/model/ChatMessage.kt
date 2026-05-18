@@ -11,6 +11,7 @@ data class ChatMessage(
     val fragment: List<MessageFragment>,
     val badges: List<Badge> = emptyList(),
     val timestamp: Long,
+    val isHistorical: Boolean = false,
     val Type: MessageType = MessageType.Regular
 )
 

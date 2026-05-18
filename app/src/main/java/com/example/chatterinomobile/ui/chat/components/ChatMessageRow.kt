@@ -1,6 +1,7 @@
 package com.example.chatterinomobile.ui.chat.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,22 +9,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -36,12 +43,15 @@ import com.example.chatterinomobile.data.model.MessageFragment
 import com.example.chatterinomobile.data.model.MessageType
 import com.example.chatterinomobile.data.model.Paint
 import com.example.chatterinomobile.data.model.ReplyMetadata
+import com.example.chatterinomobile.ui.common.rememberSoftHaptic
+import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 private const val USERNAME_ID = "username"
 
@@ -57,7 +67,7 @@ private val TimestampStyle: TextStyle
     get() = TextStyle(
         color = Twick.Ink4,
         fontSize = 11.sp,
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = PublicSansFontFamily,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
@@ -137,6 +147,9 @@ private fun lerp(start: Color, stop: Color, fraction: Float): Color =
 
 private const val MIN_USERNAME_CONTRAST = 3.5f
 private const val MAX_READABILITY_STEPS = 8
+private val SwipeReplyThreshold = 64.dp
+private val SwipeReplyMaxOffset = 96.dp
+private const val HistoricalMessageAlpha = 0.58f
 
 @Composable
 fun ChatMessageRow(
@@ -145,47 +158,126 @@ fun ChatMessageRow(
     deleted: Boolean,
     highlight: Boolean,
     modifier: Modifier = Modifier,
-    paintOverride: Paint? = null
+    paintOverride: Paint? = null,
+    onReply: (() -> Unit)? = null
 ) {
     val type = message.Type
     if (type is MessageType.System) {
-        SystemMessageRow(text = type.text, timestamp = message.timestamp, showTimestamp = showTimestamp, modifier = modifier)
+        SystemMessageRow(
+            text = type.text,
+            timestamp = message.timestamp,
+            showTimestamp = showTimestamp,
+            historical = message.isHistorical,
+            modifier = modifier
+        )
         return
     }
 
     val bg = if (highlight) Twick.AccentSoft else Color.Transparent
     val leftBorder = if (highlight) Twick.Accent else Color.Transparent
 
-    Row(
+    SwipeReplyContainer(
+        enabled = onReply != null && !deleted,
+        onReply = { onReply?.invoke() },
+        modifier = modifier
+    ) { swipeModifier ->
+        Row(
+            modifier = swipeModifier
+                .fillMaxWidth()
+                .background(bg)
+                .padding(start = if (highlight) 0.dp else 10.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
+                .alpha(
+                    when {
+                        deleted -> 0.45f
+                        message.isHistorical -> HistoricalMessageAlpha
+                        else -> 1f
+                    }
+                ),
+            verticalAlignment = Alignment.Top
+        ) {
+            if (highlight) {
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .height(20.dp)
+                        .background(leftBorder)
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                val reply = message.reply
+                if (reply != null) {
+                    ReplyPreviewRow(reply)
+                }
+                MessageBody(
+                    message = message,
+                    showTimestamp = showTimestamp,
+                    deleted = deleted,
+                    paintOverride = paintOverride
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwipeReplyContainer(
+    enabled: Boolean,
+    onReply: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable (Modifier) -> Unit
+) {
+    if (!enabled) {
+        content(modifier)
+        return
+    }
+
+    val density = LocalDensity.current
+    val haptic = rememberSoftHaptic()
+    val maxOffsetPx = with(density) { SwipeReplyMaxOffset.toPx() }
+    val thresholdPx = with(density) { SwipeReplyThreshold.toPx() }
+    var offsetPx by remember { mutableStateOf(0f) }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(bg)
-            .padding(start = if (highlight) 0.dp else 10.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
-            .alpha(if (deleted) 0.45f else 1f),
-        verticalAlignment = Alignment.Top
-    ) {
-        if (highlight) {
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .height(20.dp)
-                    .background(leftBorder)
-            )
-            Spacer(Modifier.width(8.dp))
-        }
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            val reply = message.reply
-            if (reply != null) {
-                ReplyPreviewRow(reply)
+            .pointerInput(onReply) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (offsetPx >= thresholdPx) {
+                            haptic()
+                            onReply()
+                        }
+                        offsetPx = 0f
+                    },
+                    onDragCancel = {
+                        offsetPx = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        offsetPx = (offsetPx + dragAmount).coerceIn(0f, maxOffsetPx)
+                    }
+                )
             }
-            MessageBody(
-                message = message,
-                showTimestamp = showTimestamp,
-                deleted = deleted,
-                paintOverride = paintOverride
+    ) {
+        if (offsetPx > 0f) {
+            Text(
+                text = "Reply",
+                color = Twick.Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 16.dp)
+                    .alpha((offsetPx / thresholdPx).coerceIn(0.35f, 1f))
             )
         }
+        content(
+            Modifier.offset {
+                IntOffset(offsetPx.roundToInt(), 0)
+            }
+        )
     }
 }
 
@@ -279,12 +371,14 @@ private fun SystemMessageRow(
     text: String,
     timestamp: Long,
     showTimestamp: Boolean,
+    historical: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .alpha(if (historical) HistoricalMessageAlpha else 1f),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showTimestamp) {

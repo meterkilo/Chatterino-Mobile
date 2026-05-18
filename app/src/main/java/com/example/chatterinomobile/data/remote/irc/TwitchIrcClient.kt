@@ -149,7 +149,11 @@ class TwitchIrcClient(
         }
     }
 
-    suspend fun sendMessage(channelLogin: String, text: String): SendMessageResult {
+    suspend fun sendMessage(
+        channelLogin: String,
+        text: String,
+        replyParentMessageId: String? = null
+    ): SendMessageResult {
         if (text.isBlank()) return SendMessageResult.EmptyMessage
         val prepareResult = prepareToReceiveOwnMessages(channelLogin)
         if (prepareResult != SendMessageResult.Sent) return prepareResult
@@ -162,7 +166,11 @@ class TwitchIrcClient(
             writeSession
         } ?: return SendMessageResult.Disconnected
         return runCatching {
-            ws.send("PRIVMSG #$channel :$text")
+            val replyTag = replyParentMessageId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { "@reply-parent-msg-id=${it.escapeIrcTag()} " }
+                .orEmpty()
+            ws.send("${replyTag}PRIVMSG #$channel :$text")
             SendMessageResult.Sent
         }.getOrElse { throwable ->
             stateMutex.withLock {
@@ -306,6 +314,20 @@ class TwitchIrcClient(
 
     private fun anonymousNick(): String =
         "justinfan${Random.nextInt(10_000, 99_999)}"
+
+    private fun String.escapeIrcTag(): String =
+        buildString(length) {
+            for (char in this@escapeIrcTag) {
+                when (char) {
+                    ';' -> append("\\:")
+                    ' ' -> append("\\s")
+                    '\\' -> append("\\\\")
+                    '\r' -> append("\\r")
+                    '\n' -> append("\\n")
+                    else -> append(char)
+                }
+            }
+        }
 
     private data class ConnectionAuth(
         val accessToken: String?,

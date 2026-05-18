@@ -1,6 +1,7 @@
 package com.example.chatterinomobile.ui.discovery
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -27,11 +28,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,13 +73,18 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefreshIndicator
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,11 +95,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.layout.ContentScale
@@ -98,7 +116,6 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -110,6 +127,8 @@ import coil.compose.AsyncImage
 import com.example.chatterinomobile.data.model.Category
 import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.ui.brand.HolographicSevenTvWordmark
+import com.example.chatterinomobile.ui.common.rememberSoftHaptic
+import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlin.math.roundToInt
 import org.koin.androidx.compose.koinViewModel
@@ -125,7 +144,7 @@ fun DiscoveryScreen(
     viewModel: DiscoveryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    var activeTab by remember { mutableIntStateOf(0) }
+    var activeTab by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(pinnedChannelLogins) {
         viewModel.hydratePinnedChannels(pinnedChannelLogins)
@@ -225,7 +244,7 @@ private fun SearchBody(
     isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
-    PullToRefreshBox(
+    SmoothPullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize()
@@ -384,7 +403,7 @@ private fun SearchResultRow(channel: Channel, onClick: () -> Unit) {
                     color = if (channel.isLive) Color.White else Twick.Ink3,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = PublicSansFontFamily,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .background(if (channel.isLive) Twick.Live else Twick.S2)
@@ -431,7 +450,128 @@ private fun formatFollowers(count: Int): String =
 @Composable
 private fun LoadingBody() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = Twick.Accent, modifier = Modifier.size(40.dp))
+        CleanLoadingSpinner()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SmoothPullToRefreshBox(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
+) {
+    val state = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        state = state,
+        modifier = modifier,
+        indicator = {
+            SmoothRefreshIndicator(
+                state = state,
+                isRefreshing = isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        },
+        content = content
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SmoothRefreshIndicator(
+    state: PullToRefreshState,
+    isRefreshing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val progress = state.distanceFraction.coerceIn(0f, 1.25f)
+    val visible = isRefreshing || progress > 0.02f
+    val transition = rememberInfiniteTransition(label = "smoothRefreshSpin")
+    val spin by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "smoothRefreshSpin"
+    )
+
+    Box(
+        modifier = modifier
+            .pullToRefreshIndicator(
+                state = state,
+                isRefreshing = isRefreshing,
+                containerColor = Twick.S1.copy(alpha = 0.96f),
+                shape = CircleShape,
+                elevation = 0.dp
+            )
+            .graphicsLayer {
+                alpha = if (visible) 1f else 0f
+                scaleX = if (isRefreshing) 1f else 0.72f + progress.coerceAtMost(1f) * 0.28f
+                scaleY = scaleX
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        RefreshRing(
+            rotation = if (isRefreshing) spin else progress * 160f,
+            sweep = if (isRefreshing) 92f else 40f + progress.coerceAtMost(1f) * 236f,
+            alpha = if (isRefreshing) 1f else progress.coerceIn(0.25f, 1f),
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+@Composable
+private fun CleanLoadingSpinner(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Twick.S1.copy(alpha = 0.86f)),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            color = Twick.Ink2,
+            strokeWidth = 2.dp,
+            trackColor = Twick.S3.copy(alpha = 0.34f),
+            strokeCap = StrokeCap.Round,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+@Composable
+private fun RefreshRing(
+    rotation: Float,
+    sweep: Float,
+    alpha: Float,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.rotate(rotation)) {
+        val stroke = Stroke(width = 2.15.dp.toPx(), cap = StrokeCap.Round)
+        val inset = stroke.width / 2f
+        val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
+        drawArc(
+            color = Twick.S3.copy(alpha = 0.30f * alpha),
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = arcSize,
+            style = stroke
+        )
+        drawArc(
+            color = Twick.Ink2.copy(alpha = alpha),
+            startAngle = -90f,
+            sweepAngle = sweep.coerceIn(18f, 300f),
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = arcSize,
+            style = stroke
+        )
     }
 }
 
@@ -642,7 +782,7 @@ private fun HomeBody(
     var headerBottomContentPx by remember { mutableIntStateOf(0) }
     val showFab = headerBottomContentPx > 0 && scrollState.value > headerBottomContentPx
 
-    PullToRefreshBox(
+    SmoothPullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize()
@@ -883,14 +1023,14 @@ private fun HomeHeader(liveCount: Int, savedCount: Int, onSearch: () -> Unit, mo
                         text = "● $liveCount live",
                         color = Twick.Live,
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.SansSerif
+                        fontFamily = PublicSansFontFamily
                     )
-                    Text(text = " · ", color = Twick.Ink4, fontSize = 11.sp, fontFamily = FontFamily.SansSerif)
+                    Text(text = " · ", color = Twick.Ink4, fontSize = 11.sp, fontFamily = PublicSansFontFamily)
                     Text(
                         text = "$savedCount saved",
                         color = Twick.Ink3,
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.SansSerif
+                        fontFamily = PublicSansFontFamily
                     )
                 }
             }
@@ -1231,14 +1371,14 @@ private fun PinnedRowInner(
                     color = if (item.isLive) Twick.Live else Twick.Ink4,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.SansSerif
+                    fontFamily = PublicSansFontFamily
                 )
                 if (item.scheduled != null) {
                     Text(
                         text = item.scheduled,
                         color = Twick.Ink3,
                         fontSize = 10.sp,
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PublicSansFontFamily,
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(Twick.S2)
@@ -1272,7 +1412,7 @@ private fun PinnedRowInner(
                         color = Twick.Live,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.SansSerif
+                        fontFamily = PublicSansFontFamily
                     )
                 }
             }
@@ -1282,7 +1422,7 @@ private fun PinnedRowInner(
                     color = if (item.mention) Color.White else Twick.Ink2,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = PublicSansFontFamily,
                     modifier = Modifier
                         .height(22.dp)
                         .clip(RoundedCornerShape(999.dp))
@@ -1357,7 +1497,7 @@ private fun HomeNowPlayingBar(channel: Channel, modifier: Modifier = Modifier) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("AUDIO", color = Twick.Ink3, fontSize = 9.sp, fontFamily = FontFamily.SansSerif)
+                    Text("AUDIO", color = Twick.Ink3, fontSize = 9.sp, fontFamily = PublicSansFontFamily)
                 }
                 Text(
                     text = channel.title ?: channel.gameName ?: "@${channel.login}",
@@ -1525,6 +1665,9 @@ private fun PlaceholderBody(
 
 private enum class BrowseLayout { Grid, Large, Compact }
 
+private val CategoryBackSwipeThreshold = 72.dp
+private val CategoryBackSwipeMaxOffset = 112.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BrowseBody(
@@ -1535,8 +1678,15 @@ private fun BrowseBody(
     isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var layout by remember { mutableStateOf(BrowseLayout.Large) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var layout by rememberSaveable { mutableStateOf(BrowseLayout.Large) }
+    val followingGridState = rememberLazyGridState()
+    val followingLargeListState = rememberLazyListState()
+    val followingCompactListState = rememberLazyListState()
+    val liveGridState = rememberLazyGridState()
+    val liveLargeListState = rememberLazyListState()
+    val liveCompactListState = rememberLazyListState()
+    val categoriesScrollState = rememberScrollState()
 
     val activeCategory = state.activeCategory
     if (activeCategory != null) {
@@ -1569,7 +1719,7 @@ private fun BrowseBody(
         }
     }
 
-    PullToRefreshBox(
+    SmoothPullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize()
@@ -1591,17 +1741,24 @@ private fun BrowseBody(
                         channels = sortedFollowedLive,
                         layout = layout,
                         emptyMessage = "No followed channels are live",
-                        onJoinChannel = onJoinChannel
+                        onJoinChannel = onJoinChannel,
+                        gridState = followingGridState,
+                        largeListState = followingLargeListState,
+                        compactListState = followingCompactListState
                     )
                     1 -> BrowseChannelList(
                         channels = state.topLiveStreams,
                         layout = layout,
                         emptyMessage = "No live channels available",
-                        onJoinChannel = onJoinChannel
+                        onJoinChannel = onJoinChannel,
+                        gridState = liveGridState,
+                        largeListState = liveLargeListState,
+                        compactListState = liveCompactListState
                     )
                     else -> BrowseCategoriesGrid(
                         categories = state.topCategories,
-                        onOpenCategory = onOpenCategory
+                        onOpenCategory = onOpenCategory,
+                        scrollState = categoriesScrollState
                     )
                 }
             }
@@ -1624,6 +1781,7 @@ private fun BrowseTabBar(
     showLayoutToggle: Boolean
 ) {
     val labels = listOf("Following", "Live Channels", "Categories")
+    val haptic = rememberSoftHaptic()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1637,7 +1795,10 @@ private fun BrowseTabBar(
             labels.forEachIndexed { index, label ->
                 val active = index == selectedTab
                 Column(
-                    modifier = Modifier.clickable { onTabSelected(index) },
+                    modifier = Modifier.clickable {
+                        if (!active) haptic()
+                        onTabSelected(index)
+                    },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -1666,7 +1827,10 @@ private fun BrowseTabBar(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onLayoutToggle),
+                    .clickable {
+                        haptic()
+                        onLayoutToggle()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -1685,23 +1849,39 @@ private fun BrowseChannelList(
     channels: List<Channel>,
     layout: BrowseLayout,
     emptyMessage: String,
-    onJoinChannel: (String) -> Unit
+    onJoinChannel: (String) -> Unit,
+    gridState: LazyGridState? = null,
+    largeListState: LazyListState? = null,
+    compactListState: LazyListState? = null
 ) {
     if (channels.isEmpty()) {
         BrowseEmpty(emptyMessage)
         return
     }
     when (layout) {
-        BrowseLayout.Grid -> BrowseChannelGrid(channels = channels, onJoinChannel = onJoinChannel)
-        BrowseLayout.Large -> BrowseChannelLargeList(channels = channels, onJoinChannel = onJoinChannel)
-        BrowseLayout.Compact -> BrowseChannelCompactList(channels = channels, onJoinChannel = onJoinChannel)
+        BrowseLayout.Grid -> BrowseChannelGrid(
+            channels = channels,
+            onJoinChannel = onJoinChannel,
+            state = gridState ?: rememberLazyGridState()
+        )
+        BrowseLayout.Large -> BrowseChannelLargeList(
+            channels = channels,
+            onJoinChannel = onJoinChannel,
+            state = largeListState ?: rememberLazyListState()
+        )
+        BrowseLayout.Compact -> BrowseChannelCompactList(
+            channels = channels,
+            onJoinChannel = onJoinChannel,
+            state = compactListState ?: rememberLazyListState()
+        )
     }
 }
 
 @Composable
 private fun BrowseCategoriesGrid(
     categories: List<Category>,
-    onOpenCategory: (Category) -> Unit
+    onOpenCategory: (Category) -> Unit,
+    scrollState: ScrollState = rememberScrollState()
 ) {
     if (categories.isEmpty()) {
         BrowseEmpty("No categories available")
@@ -1711,7 +1891,7 @@ private fun BrowseCategoriesGrid(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
     ) {
         Spacer(Modifier.height(8.dp))
         categories.chunked(2).forEach { pair ->
@@ -1802,12 +1982,40 @@ private fun CategoryDetailBody(
     isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
-    PullToRefreshBox(
+    val density = LocalDensity.current
+    val haptic = rememberSoftHaptic()
+    val backSwipeThresholdPx = with(density) { CategoryBackSwipeThreshold.toPx() }
+    val backSwipeMaxOffsetPx = with(density) { CategoryBackSwipeMaxOffset.toPx() }
+    var backSwipeOffsetPx by remember(category.id) { mutableFloatStateOf(0f) }
+
+    SmoothPullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(category.id) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (-backSwipeOffsetPx >= backSwipeThresholdPx) {
+                            haptic()
+                            onBack()
+                        }
+                        backSwipeOffsetPx = 0f
+                    },
+                    onDragCancel = { backSwipeOffsetPx = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        backSwipeOffsetPx = (backSwipeOffsetPx + dragAmount)
+                            .coerceIn(-backSwipeMaxOffsetPx, 0f)
+                    }
+                )
+            }
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { IntOffset(backSwipeOffsetPx.roundToInt(), 0) }
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1860,7 +2068,7 @@ private fun CategoryDetailBody(
                                 text = "${formatViewers(category.viewerCount)} viewers",
                                 color = Twick.Ink3,
                                 fontSize = 11.sp,
-                                fontFamily = FontFamily.SansSerif
+                                fontFamily = PublicSansFontFamily
                             )
                         }
                     }
@@ -1961,9 +2169,14 @@ private fun ChannelSubtitleRow(channel: Channel) {
 }
 
 @Composable
-private fun BrowseChannelGrid(channels: List<Channel>, onJoinChannel: (String) -> Unit) {
+private fun BrowseChannelGrid(
+    channels: List<Channel>,
+    onJoinChannel: (String) -> Unit,
+    state: LazyGridState
+) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
+        state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2011,7 +2224,7 @@ private fun BrowseChannelGrid(channels: List<Channel>, onJoinChannel: (String) -
                             color = Color.White,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.SansSerif
+                            fontFamily = PublicSansFontFamily
                         )
                     }
                 }
@@ -2033,8 +2246,13 @@ private fun BrowseChannelGrid(channels: List<Channel>, onJoinChannel: (String) -
 }
 
 @Composable
-private fun BrowseChannelLargeList(channels: List<Channel>, onJoinChannel: (String) -> Unit) {
+private fun BrowseChannelLargeList(
+    channels: List<Channel>,
+    onJoinChannel: (String) -> Unit,
+    state: LazyListState
+) {
     LazyColumn(
+        state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -2081,7 +2299,7 @@ private fun BrowseChannelLargeList(channels: List<Channel>, onJoinChannel: (Stri
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.SansSerif
+                            fontFamily = PublicSansFontFamily
                         )
                     }
                 }
@@ -2157,8 +2375,13 @@ private fun BrowseChannelLargeList(channels: List<Channel>, onJoinChannel: (Stri
 }
 
 @Composable
-private fun BrowseChannelCompactList(channels: List<Channel>, onJoinChannel: (String) -> Unit) {
+private fun BrowseChannelCompactList(
+    channels: List<Channel>,
+    onJoinChannel: (String) -> Unit,
+    state: LazyListState
+) {
     LazyColumn(
+        state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -2249,7 +2472,7 @@ private fun BrowseChannelCompactList(channels: List<Channel>, onJoinChannel: (St
                         color = Twick.Ink2,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.SansSerif
+                        fontFamily = PublicSansFontFamily
                     )
                 }
             }
@@ -2304,6 +2527,7 @@ private fun DiscoveryBottomBar(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = rememberSoftHaptic()
     val tabs = listOf(
         BottomDestination("Home", BottomNavIcon.Home),
         BottomDestination("Browse", BottomNavIcon.Browse),
@@ -2350,7 +2574,10 @@ private fun DiscoveryBottomBar(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = { onTabSelected(idx) }
+                            onClick = {
+                                if (!isActive) haptic()
+                                onTabSelected(idx)
+                            }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -2573,7 +2800,7 @@ private fun StreamCard(channel: Channel, onClick: () -> Unit) {
                     color = Color.White,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.SansSerif
+                    fontFamily = PublicSansFontFamily
                 )
                 ViewerCountLabel(
                     count = channel.viewerCount,
@@ -2600,7 +2827,7 @@ private fun StreamCard(channel: Channel, onClick: () -> Unit) {
                         .clip(CircleShape)
                         .background(Twick.Twitch)
                 )
-                Text(text = "TWITCH", color = Twick.Ink, fontSize = 10.sp, fontFamily = FontFamily.SansSerif)
+                Text(text = "TWITCH", color = Twick.Ink, fontSize = 10.sp, fontFamily = PublicSansFontFamily)
             }
         }
 
@@ -2699,7 +2926,7 @@ private fun LivePill(viewerText: String? = null) {
             color = Color.White,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.SansSerif
+            fontFamily = PublicSansFontFamily
         )
         if (viewerText != null) {
             Text(
@@ -2707,7 +2934,7 @@ private fun LivePill(viewerText: String? = null) {
                 color = Color.White,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.SansSerif
+                fontFamily = PublicSansFontFamily
             )
         }
     }
@@ -2812,7 +3039,7 @@ private fun ViewerCountLabel(
             color = color,
             fontSize = fontSize.sp,
             fontWeight = fontWeight,
-            fontFamily = FontFamily.SansSerif
+            fontFamily = PublicSansFontFamily
         )
     }
 }

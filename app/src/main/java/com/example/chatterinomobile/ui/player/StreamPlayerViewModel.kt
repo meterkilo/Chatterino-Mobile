@@ -24,6 +24,7 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.example.chatterinomobile.data.repository.TwitchPlaybackRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -49,6 +50,7 @@ class StreamPlayerViewModel(
     private var nativePlayer: ExoPlayer? = null
     private var hlsMediaSourceFactory: HlsMediaSource.Factory? = null
     private var nativeLoadJob: Job? = null
+    private var adInfoJob: Job? = null
     private var activeChannelLogin: String? = null
     private var activeBackend: StreamPlayerBackend? = null
     private var loadedEmbedChannelLogin: String? = null
@@ -110,6 +112,9 @@ class StreamPlayerViewModel(
 
     fun stopPlayback() {
         nativeLoadJob?.cancel()
+        adInfoJob?.cancel()
+        adInfoJob = null
+        clearAdInfo()
         nativePlayer?.pause()
         cachedWebView?.evaluateJavascript(
             "(window.__7tvVideoEl || document.querySelector('video'))?.pause()",
@@ -119,6 +124,8 @@ class StreamPlayerViewModel(
 
     fun clear() {
         nativeLoadJob?.cancel()
+        adInfoJob?.cancel()
+        adInfoJob = null
         nativePlayer?.clearMediaItems()
         cachedWebView?.let { webView ->
             (webView.parent as? ViewGroup)?.removeView(webView)
@@ -134,6 +141,7 @@ class StreamPlayerViewModel(
 
     override fun onCleared() {
         nativeLoadJob?.cancel()
+        adInfoJob?.cancel()
         nativePlayer?.release()
         nativePlayer = null
         cachedWebView?.destroy()
@@ -143,6 +151,8 @@ class StreamPlayerViewModel(
 
     private fun playNative(channelLogin: String) {
         nativeLoadJob?.cancel()
+        adInfoJob?.cancel()
+        adInfoJob = null
         stopEmbedPlayback()
         _qualityState.value = VideoQualityState()
         _uiState.value = StreamPlayerUiState(
@@ -186,6 +196,7 @@ class StreamPlayerViewModel(
         player.prepare()
         player.playWhenReady = true
         player.play()
+        startAdInfoTicker(player)
         _uiState.value = StreamPlayerUiState(
             backend = StreamPlayerBackend.Native,
             loadState = StreamPlayerLoadState.Ready,
@@ -195,6 +206,9 @@ class StreamPlayerViewModel(
 
     private fun playEmbed(channelLogin: String, fallbackReason: String? = null) {
         nativeLoadJob?.cancel()
+        adInfoJob?.cancel()
+        adInfoJob = null
+        clearAdInfo()
         nativePlayer?.pause()
         activeBackend = StreamPlayerBackend.TwitchEmbed
         _uiState.value = StreamPlayerUiState(
@@ -279,13 +293,47 @@ class StreamPlayerViewModel(
                         Player.STATE_READY -> _uiState.value = StreamPlayerUiState(
                             backend = StreamPlayerBackend.Native,
                             loadState = StreamPlayerLoadState.Ready,
-                            channelLogin = channelLogin
+                            channelLogin = channelLogin,
+                            adInfo = _uiState.value.adInfo
                         )
                     }
                 }
             }
         )
         return player
+    }
+
+    private fun startAdInfoTicker(player: ExoPlayer) {
+        adInfoJob?.cancel()
+        adInfoJob = viewModelScope.launch {
+            while (true) {
+                refreshAdInfo(player)
+                delay(AD_INFO_POLL_MS)
+            }
+        }
+    }
+
+    private fun refreshAdInfo(player: ExoPlayer) {
+        if (_uiState.value.backend != StreamPlayerBackend.Native || !player.isPlayingAd) {
+            clearAdInfo()
+            return
+        }
+        val duration = player.duration.takeUnless { it == C.TIME_UNSET || it <= 0L }
+        val remainingMs = duration?.let { (it - player.currentPosition).coerceAtLeast(0L) }
+        val adIndex = player.currentAdIndexInAdGroup.takeIf { it >= 0 }?.plus(1)
+        _uiState.update {
+            it.copy(
+                adInfo = AdPlaybackInfo(
+                    remainingMs = remainingMs,
+                    adIndex = adIndex
+                )
+            )
+        }
+    }
+
+    private fun clearAdInfo() {
+        if (_uiState.value.adInfo == null) return
+        _uiState.update { it.copy(adInfo = null) }
     }
 
     private fun refreshQualityState(tracks: Tracks) {
@@ -410,6 +458,7 @@ class StreamPlayerViewModel(
         const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_000
         const val AD_SEGMENT_RETRY_COUNT = 6
         const val AD_SEGMENT_SKIP_DELAY_MS = 500L
+        const val AD_INFO_POLL_MS = 500L
         const val INIT_EMBED_PLAYBACK_SCRIPT = """
             (() => {
               if (window.__7tvInitPlayback) {
@@ -440,6 +489,24 @@ class StreamPlayerViewModel(
                   resolve(null);
                 }, timeout);
               });
+
+              // Inject CSS once to hide the Twitch embed thumbnail/poster
+              // patch that appears near the play button.
+              if (!window.__7tvStyleInjected) {
+                window.__7tvStyleInjected = true;
+                const style = document.createElement('style');
+                style.textContent = [
+                  '.preview-card-overlay',
+                  '.channel-status-info',
+                  '[data-a-target="player-overlay-click-handler"] img',
+                  '[data-a-target="player-overlay-click-handler"] .tw-image',
+                  '.player-overlay__image',
+                  '.tw-transition-group',
+                  'img.preview-image',
+                  '.preview-image'
+                ].join(',') + '{ display: none !important; }';
+                document.head.appendChild(style);
+              }
 
               window.__7tvInitPlayback = async () => {
                 const video = await window.__7tvWaitFor('video');
@@ -492,8 +559,32 @@ data class StreamPlayerUiState(
     val backend: StreamPlayerBackend = StreamPlayerBackend.Native,
     val loadState: StreamPlayerLoadState = StreamPlayerLoadState.Idle,
     val channelLogin: String? = null,
-    val message: String? = null
+    val message: String? = null,
+    val adInfo: AdPlaybackInfo? = null
 )
+
+data class AdPlaybackInfo(
+    val remainingMs: Long? = null,
+    val adIndex: Int? = null
+) {
+    val label: String
+        get() = buildString {
+            append("Advertisement playing")
+            if (adIndex != null) append(" · Ad $adIndex")
+            remainingMs?.let { append(" · ${formatAdTime(it)} left") }
+        }
+}
+
+private fun formatAdTime(milliseconds: Long): String {
+    val totalSeconds = (milliseconds / 1000).coerceAtLeast(0)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return if (minutes > 0) {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "${seconds}s"
+    }
+}
 
 enum class StreamPlayerBackend {
     Native,

@@ -1,12 +1,15 @@
 package com.example.chatterinomobile.data.repository
 
 import com.example.chatterinomobile.data.model.ChatMessage
+import com.example.chatterinomobile.data.model.ChatUser
 import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.data.model.ChannelHydrationState
+import com.example.chatterinomobile.data.model.MessageType
 import com.example.chatterinomobile.data.model.ModerationEvent
 import com.example.chatterinomobile.data.model.RoomState
 import com.example.chatterinomobile.data.model.SendMessageResult
 import com.example.chatterinomobile.data.model.UserChatState
+import com.example.chatterinomobile.data.remote.api.RecentMessagesApi
 import com.example.chatterinomobile.data.remote.irc.IrcMessageMapper
 import com.example.chatterinomobile.data.remote.irc.MessageEnricher
 import com.example.chatterinomobile.data.remote.irc.ModerationEventMapper
@@ -23,11 +26,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +47,7 @@ class ChatRepositoryImpl(
     private val roomStateMapper: RoomStateMapper,
     private val userStateMapper: UserStateMapper,
     private val enricher: MessageEnricher,
+    private val recentMessagesApi: RecentMessagesApi,
     private val channelRepository: ChannelRepository,
     private val badgeRepository: BadgeRepository,
     private val emoteRepository: EmoteRepository
@@ -62,6 +68,10 @@ class ChatRepositoryImpl(
     private val hydrationJobsByLogin = HashMap<String, Job>()
     private val requestedThirdPartyBadgeUsers = HashSet<String>()
     private val sendTimestampsByChannel = HashMap<String, ArrayDeque<Long>>()
+    private val recentMessages = MutableSharedFlow<ChatMessage>(
+        replay = 0,
+        extraBufferCapacity = RECENT_MESSAGE_BUFFER_CAPACITY
+    )
 
     private val _roomStates = MutableStateFlow<Map<String, RoomState>>(emptyMap())
     override val roomStates: StateFlow<Map<String, RoomState>> = _roomStates.asStateFlow()
@@ -110,21 +120,18 @@ class ChatRepositoryImpl(
         }
     }
 
-    override val messages: Flow<ChatMessage> =
+    private val liveMessages: Flow<ChatMessage> =
         ircClient.incoming
             .buffer(MESSAGE_PIPELINE_BUFFER_CAPACITY)
             .mapNotNull { raw ->
                 mapper.map(raw)
             }
             .map { msg ->
-                enricher.requestCosmetics(msg)
-                if (shouldRequestThirdPartyBadges(msg.author.id)) {
-                    scope.launch {
-                        runCatching { enricher.loadThirdPartyBadges(msg) }
-                    }
-                }
-                enricher.enrichFromCache(msg)
+                enrichMessage(msg)
             }
+
+    override val messages: Flow<ChatMessage> =
+        merge(liveMessages, recentMessages)
             .shareIn(scope, SharingStarted.Eagerly, replay = 0)
 
     override val moderationEvents: Flow<ModerationEvent> =
@@ -142,7 +149,7 @@ class ChatRepositoryImpl(
 
     override suspend fun joinChannel(channelLogin: String) {
         val normalizedLogin = channelLogin.lowercase().removePrefix("#")
-        joinedChannelMutex.withLock {
+        val wasAdded = joinedChannelMutex.withLock {
             joinedChannelLogins.add(normalizedLogin)
         }
         _channelHydrationStates.value = _channelHydrationStates.value + (
@@ -156,6 +163,9 @@ class ChatRepositoryImpl(
         ircClient.joinChannel(normalizedLogin)
         ensureGlobalCachesLoadedAsync()
         hydrateChannelCachesAsync(normalizedLogin)
+        if (wasAdded) {
+            loadRecentMessagesAsync(normalizedLogin)
+        }
     }
 
     override suspend fun leaveChannel(channelLogin: String) {
@@ -167,11 +177,15 @@ class ChatRepositoryImpl(
         ircClient.partChannel(normalizedLogin)
     }
 
-    override suspend fun sendMessage(channelLogin: String, text: String): SendMessageResult {
+    override suspend fun sendMessage(
+        channelLogin: String,
+        text: String,
+        replyParentMessageId: String?
+    ): SendMessageResult {
         val normalizedLogin = channelLogin.lowercase().removePrefix("#")
         if (text.isBlank()) return SendMessageResult.EmptyMessage
         awaitSendPermit(normalizedLogin)
-        return ircClient.sendMessage(normalizedLogin, text)
+        return ircClient.sendMessage(normalizedLogin, text, replyParentMessageId)
     }
 
     override suspend fun disconnect() {
@@ -198,6 +212,47 @@ class ChatRepositoryImpl(
         scope.launch {
             runCatching { ensureGlobalCachesLoaded() }
         }
+    }
+
+    private fun loadRecentMessagesAsync(channelLogin: String) {
+        scope.launch {
+            runCatching {
+                recentMessagesApi.getRecentMessages(channelLogin, RECENT_MESSAGES_LIMIT)
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                emptyList()
+            }.asSequence()
+                .mapNotNull { raw -> mapper.map(raw) }
+                .map { message -> enrichMessage(message) }
+                .forEach { message -> recentMessages.emit(message) }
+
+            recentMessages.emit(createJoinedChatMessage(channelLogin))
+        }
+    }
+
+    private fun createJoinedChatMessage(channelLogin: String): ChatMessage {
+        val timestamp = System.currentTimeMillis()
+        return ChatMessage(
+            id = "$channelLogin-joined-$timestamp",
+            channelId = channelLogin,
+            author = SYSTEM_AUTHOR,
+            reply = null,
+            fragment = emptyList(),
+            badges = emptyList(),
+            timestamp = timestamp,
+            isHistorical = false,
+            Type = MessageType.System("You joined #$channelLogin.")
+        )
+    }
+
+    private fun enrichMessage(message: ChatMessage): ChatMessage {
+        enricher.requestCosmetics(message)
+        if (shouldRequestThirdPartyBadges(message.author.id)) {
+            scope.launch {
+                runCatching { enricher.loadThirdPartyBadges(message) }
+            }
+        }
+        return enricher.enrichFromCache(message)
     }
 
     private suspend fun reconnectLoop() {
@@ -336,6 +391,15 @@ class ChatRepositoryImpl(
     companion object {
         private const val MAX_MESSAGES_PER_WINDOW = 20
         private const val SEND_WINDOW_MILLIS = 30_000L
+        private const val RECENT_MESSAGES_LIMIT = 50
+        private const val RECENT_MESSAGE_BUFFER_CAPACITY = 128
         private const val MESSAGE_PIPELINE_BUFFER_CAPACITY = 4_096
+        private val SYSTEM_AUTHOR = ChatUser(
+            id = "system",
+            login = "system",
+            displayName = "system",
+            color = null,
+            paint = null
+        )
     }
 }

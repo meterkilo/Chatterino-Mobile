@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -42,12 +43,16 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chatterinomobile.data.model.ReplyMetadata
 import com.example.chatterinomobile.ui.chat.AutocompleteKind
 import com.example.chatterinomobile.ui.chat.AutocompleteQuery
 import com.example.chatterinomobile.ui.chat.UserAutocompleteSuggestion
+import com.example.chatterinomobile.ui.common.rememberSoftHaptic
 import com.example.chatterinomobile.ui.theme.Twick
 
 @Composable
@@ -60,16 +65,20 @@ fun ChatInputBar(
     autocompleteResults: List<CompletionItem>,
     onAutocompleteQueryChanged: (AutocompleteQuery?) -> Unit,
     modifier: Modifier = Modifier,
+    pendingReply: ReplyMetadata? = null,
+    onCancelReply: () -> Unit = {},
     onEmotePicker: (() -> Unit)? = null,
     insertEmoteRequest: EmoteInsertion? = null,
     onInsertEmoteRequestConsumed: () -> Unit = {}
 ) {
     var value by remember { mutableStateOf(TextFieldValue("")) }
     var focused by remember { mutableStateOf(false) }
+    val haptic = rememberSoftHaptic()
     val canSend = enabled && value.text.isNotBlank()
     val submitMessage = {
         val toSend = value.text.replace('\n', ' ').trim()
         if (enabled && toSend.isNotEmpty()) {
+            haptic()
             onSend(toSend)
             value = TextFieldValue("")
             onAutocompleteQueryChanged(null)
@@ -88,6 +97,9 @@ fun ChatInputBar(
             .fillMaxWidth()
             .background(Twick.S1)
     ) {
+        if (pendingReply != null) {
+            ReplyComposerPreview(reply = pendingReply, onCancel = onCancelReply)
+        }
         if (autocompleteResults.isNotEmpty()) {
             EmoteAutocompleteStrip(
                 results = autocompleteResults,
@@ -159,7 +171,12 @@ fun ChatInputBar(
                     enabled = enabled,
                     singleLine = false,
                     maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Send
+                    ),
                     keyboardActions = KeyboardActions(onSend = { submitMessage() }),
                     cursorBrush = SolidColor(Twick.Accent),
                     textStyle = LocalTextStyle.current.copy(color = Twick.Ink, fontSize = 13.sp),
@@ -217,6 +234,57 @@ fun ChatInputBar(
     }
 }
 
+@Composable
+private fun ReplyComposerPreview(
+    reply: ReplyMetadata,
+    onCancel: () -> Unit
+) {
+    val target = reply.parentDisplayName ?: reply.parentUserLogin ?: "message"
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Twick.S2)
+            .padding(start = 10.dp, top = 7.dp, end = 6.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 3.dp, height = 30.dp)
+                .background(Twick.Accent, RoundedCornerShape(999.dp))
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Replying to @$target",
+                color = Twick.Ink,
+                fontSize = 12.sp,
+                maxLines = 1
+            )
+            reply.parentBody?.takeIf { it.isNotBlank() }?.let { body ->
+                Text(
+                    text = body,
+                    color = Twick.Ink3,
+                    fontSize = 11.sp,
+                    maxLines = 1
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clickable(onClick = onCancel),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Cancel reply",
+                tint = Twick.Ink3,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+    }
+}
+
 data class EmoteInsertion(val name: String, val nonce: Long)
 
 sealed interface CompletionItem {
@@ -244,10 +312,14 @@ private fun EmoteAutocompleteStrip(
 
 @Composable
 private fun AutocompleteChip(item: CompletionItem, onClick: () -> Unit) {
+    val haptic = rememberSoftHaptic()
     Row(
         modifier = Modifier
             .background(Twick.S1, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .clickable {
+                haptic()
+                onClick()
+            }
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -269,10 +341,14 @@ private fun IconCircle(
     onClick: () -> Unit,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val haptic = rememberSoftHaptic()
     Box(
         modifier = Modifier
             .size(32.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled) {
+                haptic()
+                onClick()
+            },
         contentAlignment = Alignment.Center,
         content = content
     )

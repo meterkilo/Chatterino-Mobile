@@ -29,11 +29,11 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 
 @Composable
 internal fun HolographicSevenTvWordmark(
@@ -80,7 +80,7 @@ internal fun HolographicSevenTvWordmark(
             style = TextStyle(
                 brush = textBrush,
                 fontSize = 12.5.sp,
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PublicSansFontFamily,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.7).sp
             ),
@@ -102,8 +102,8 @@ internal fun HolographicSevenTvLogo(
     floating: Boolean = true,
     shimmer: Boolean = true,
     contentScale: Float = 0.84f,
-    opticalOffsetX: Float = -0.065f,
-    opticalOffsetY: Float = -0.055f
+    opticalOffsetX: Float = -0.09f,
+    opticalOffsetY: Float = -0.085f
 ) {
     val transition = rememberInfiniteTransition(label = "holographicSevenTv")
     val floatOffset by transition.animateFloat(

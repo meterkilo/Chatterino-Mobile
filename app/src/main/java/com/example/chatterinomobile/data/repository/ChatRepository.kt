@@ -29,7 +29,7 @@ interface ChatRepository {
 
     suspend fun leaveChannel(channelLogin: String)
 
-    suspend fun sendMessage(channelLogin: String, text: String): SendMessageResult
+    suspend fun sendMessage(channelLogin: String, text: String, replyParentMessageId: String? = null): SendMessageResult
 
     suspend fun disconnect()
 }

@@ -2,6 +2,7 @@ package com.example.chatterinomobile.ui.player
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Rect
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
@@ -19,16 +20,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.VideoLabel
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,22 +50,129 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnAttach
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
-import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.ui.channels.ActiveChannelState
+import com.example.chatterinomobile.ui.common.rememberSoftHaptic
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
+
+/**
+ * Compact channel info bar shown underneath the player.
+ *
+ * Three tight rows: avatar + display name (with optional partner badge), stream
+ * title, and viewer count. Used as a persistent strip below the player so the
+ * focused-player overlay can stay minimal (PiP / close / controls only).
+ */
+@Composable
+fun ChannelInfoBar(
+    activeChannel: ActiveChannelState,
+    modifier: Modifier = Modifier
+) {
+    val channel = activeChannel.channel
+    val channelLogin = activeChannel.channelLogin ?: return
+    val displayName = channel.displayNameOrLogin(channelLogin)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Twick.Bg)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Twick.Accent),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!channel?.profileImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = channel?.profileImageUrl,
+                    contentDescription = displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text(
+                    text = displayName.firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayName,
+                    color = Twick.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (channel?.isPartner == true) {
+                    Icon(
+                        imageVector = Icons.Filled.Verified,
+                        contentDescription = "Partner",
+                        tint = Twick.Accent,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+            channel?.title?.takeIf { it.isNotBlank() }?.let { title ->
+                Text(
+                    text = title,
+                    color = Twick.Ink2,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if ((channel?.viewerCount ?: 0) > 0) {
+                Text(
+                    text = "${formatViewerCount(channel?.viewerCount ?: 0)} viewers",
+                    color = Twick.Ink3,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun TwitchStreamStage(
@@ -75,7 +182,11 @@ fun TwitchStreamStage(
     onTheaterToggle: (() -> Unit)? = null,
     videoVisible: Boolean = true,
     onVideoVisibleChange: ((Boolean) -> Unit)? = null,
+    onEnterPip: ((Rect?) -> Unit)? = null,
+    onPlayerBoundsChanged: ((Rect?) -> Unit)? = null,
+    onFocusOverlayVisibleChange: ((Boolean) -> Unit)? = null,
     fillBounds: Boolean = false,
+    pipMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val channelLogin = activeChannel.channelLogin
@@ -90,16 +201,20 @@ fun TwitchStreamStage(
         fullscreen = false
     }
 
-    // Force landscape when theater/fullscreen is active; restore on exit.
-    DisposableEffect(fullscreen, theaterMode, activity) {
+    LaunchedEffect(fullscreen, theaterMode, pipMode, activity) {
         val act = activity as? Activity
         if (act != null) {
-            act.requestedOrientation = if (fullscreen || theaterMode) {
+            act.requestedOrientation = if (pipMode) {
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            } else if (fullscreen || theaterMode) {
                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
         }
+    }
+
+    DisposableEffect(activity) {
         onDispose {
             (activity as? Activity)?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -128,6 +243,9 @@ fun TwitchStreamStage(
 
         else -> {
             if (fullscreen) {
+                LaunchedEffect(fullscreen) {
+                    onFocusOverlayVisibleChange?.invoke(false)
+                }
                 StreamFullscreenPlaceholder(
                     channelName = channel.displayNameOrLogin(channelLogin),
                     onClick = { fullscreen = false },
@@ -135,22 +253,19 @@ fun TwitchStreamStage(
                 )
             } else {
                 StreamPlayerFrame(
-                    channel = channel,
                     channelLogin = channelLogin,
                     playerViewModel = playerViewModel,
                     playerState = playerState,
                     fullscreen = false,
                     theaterMode = theaterMode,
                     onFullscreen = {
-                        // If currently in theater mode, exit theater and revert to vertical;
-                        // otherwise enter fullscreen.
-                        if (theaterMode) {
-                            onTheaterToggle?.invoke()
-                        } else {
-                            fullscreen = true
-                        }
+                        fullscreen = true
                     },
                     onTheaterToggle = onTheaterToggle,
+                    onEnterPip = onEnterPip,
+                    onPlayerBoundsChanged = onPlayerBoundsChanged,
+                    onFocusOverlayVisibleChange = onFocusOverlayVisibleChange,
+                    pipMode = pipMode,
                     onClose = {
                         onVideoVisibleChange?.invoke(false)
                         playerViewModel.stopPlayback()
@@ -174,25 +289,30 @@ fun TwitchStreamStage(
                         decorFitsSystemWindows = false
                     )
                 ) {
+                    ImmersiveFullscreenEffect(enabled = true)
                     StreamPlayerFrame(
-                        channel = channel,
                         channelLogin = channelLogin,
                         playerViewModel = playerViewModel,
                         playerState = playerState,
                         fullscreen = true,
                         theaterMode = theaterMode,
                         onFullscreen = {
-                            // Exiting fullscreen: if we were also in theater mode,
-                            // drop out of theater too so we revert to the vertical layout.
-                            if (theaterMode) onTheaterToggle?.invoke()
                             fullscreen = false
                         },
-                        onTheaterToggle = onTheaterToggle,
+                        onTheaterToggle = onTheaterToggle?.let { toggle ->
+                            {
+                                toggle()
+                                fullscreen = false
+                            }
+                        },
+                        onEnterPip = onEnterPip,
+                        onPlayerBoundsChanged = onPlayerBoundsChanged,
+                        onFocusOverlayVisibleChange = null,
+                        pipMode = pipMode,
                         onClose = { fullscreen = false },
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color.Black)
-                            .systemBarsPadding()
                     )
                 }
             }
@@ -202,7 +322,6 @@ fun TwitchStreamStage(
 
 @Composable
 private fun StreamPlayerFrame(
-    channel: Channel?,
     channelLogin: String,
     playerViewModel: StreamPlayerViewModel,
     playerState: StreamPlayerUiState,
@@ -210,6 +329,10 @@ private fun StreamPlayerFrame(
     theaterMode: Boolean,
     onFullscreen: () -> Unit,
     onTheaterToggle: (() -> Unit)?,
+    onEnterPip: ((Rect?) -> Unit)?,
+    onPlayerBoundsChanged: ((Rect?) -> Unit)?,
+    onFocusOverlayVisibleChange: ((Boolean) -> Unit)?,
+    pipMode: Boolean = false,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -227,6 +350,8 @@ private fun StreamPlayerFrame(
     val qualityState by playerViewModel.qualityState.collectAsState()
     val muted by playerViewModel.muted.collectAsState()
     var qualityMenuOpen by remember(channelLogin) { mutableStateOf(false) }
+    var playerBounds by remember { mutableStateOf<Rect?>(null) }
+    val focusOverlayVisible = overlayVisible || isLoading || loadError || qualityMenuOpen
 
     LaunchedEffect(channelLogin) {
         overlayVisible = true
@@ -242,9 +367,28 @@ private fun StreamPlayerFrame(
         }
     }
 
+    LaunchedEffect(focusOverlayVisible, onFocusOverlayVisibleChange) {
+        onFocusOverlayVisibleChange?.invoke(focusOverlayVisible)
+    }
+
+    DisposableEffect(onFocusOverlayVisibleChange) {
+        onDispose { onFocusOverlayVisibleChange?.invoke(false) }
+    }
+
     Box(
         modifier = modifier
-            .background(Color.Black),
+            .background(Color.Black)
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                val rect = Rect(
+                    bounds.left.roundToInt(),
+                    bounds.top.roundToInt(),
+                    bounds.right.roundToInt(),
+                    bounds.bottom.roundToInt()
+                )
+                playerBounds = rect
+                onPlayerBoundsChanged?.invoke(rect)
+            },
         contentAlignment = Alignment.Center
     ) {
         when {
@@ -270,11 +414,7 @@ private fun StreamPlayerFrame(
         }
 
         if (isLoading && !loadError) {
-            CircularProgressIndicator(
-                color = Twick.Accent,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(28.dp)
-            )
+            StreamLoadingSpinner()
         }
 
         if (loadError) {
@@ -291,10 +431,17 @@ private fun StreamPlayerFrame(
                 .clickable { overlayPulse += 1 }
         )
 
-        if (overlayVisible || isLoading || loadError || qualityMenuOpen) {
+        playerState.adInfo?.let { adInfo ->
+            AdPlaybackBadge(
+                adInfo = adInfo,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 10.dp, bottom = if (overlayVisible || qualityMenuOpen) 54.dp else 8.dp)
+            )
+        }
+
+        if (focusOverlayVisible && !pipMode) {
             PlayerFocusOverlay(
-                channel = channel,
-                channelLogin = channelLogin,
                 fullscreen = fullscreen,
                 theaterMode = theaterMode,
                 muted = muted,
@@ -304,6 +451,7 @@ private fun StreamPlayerFrame(
                 },
                 onFullscreen = onFullscreen,
                 onTheaterToggle = onTheaterToggle,
+                onEnterPip = onEnterPip?.let { enterPip -> { enterPip(playerBounds) } },
                 qualityState = qualityState,
                 qualityMenuOpen = qualityMenuOpen,
                 onQualityClick = {
@@ -318,6 +466,25 @@ private fun StreamPlayerFrame(
                 onClose = onClose
             )
         }
+    }
+}
+
+@Composable
+private fun StreamLoadingSpinner(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.42f)),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            color = Color.White.copy(alpha = 0.86f),
+            strokeWidth = 2.dp,
+            trackColor = Color.White.copy(alpha = 0.16f),
+            strokeCap = StrokeCap.Round,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
 
@@ -419,14 +586,13 @@ private fun TwitchWebViewSurface(
 
 @Composable
 private fun BoxScope.PlayerFocusOverlay(
-    channel: Channel?,
-    channelLogin: String,
     fullscreen: Boolean,
     theaterMode: Boolean,
     muted: Boolean,
     onMuteToggle: () -> Unit,
     onFullscreen: () -> Unit,
     onTheaterToggle: (() -> Unit)?,
+    onEnterPip: (() -> Unit)?,
     qualityState: VideoQualityState,
     qualityMenuOpen: Boolean,
     onQualityClick: () -> Unit,
@@ -434,18 +600,16 @@ private fun BoxScope.PlayerFocusOverlay(
     onDismissQualityMenu: () -> Unit,
     onClose: () -> Unit
 ) {
-    val displayName = channel.displayNameOrLogin(channelLogin)
-
-    // Top gradient — darkens the top edge so the avatar/metadata is legible.
+    // Top gradient — light scrim behind the PiP / close buttons.
     Box(
         modifier = Modifier
             .align(Alignment.TopCenter)
             .fillMaxWidth()
-            .height(96.dp)
+            .height(56.dp)
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color.Black.copy(alpha = 0.65f),
+                        Color.Black.copy(alpha = 0.55f),
                         Color.Transparent
                     )
                 )
@@ -468,80 +632,18 @@ private fun BoxScope.PlayerFocusOverlay(
             )
     )
 
-    // Top-left channel info — tight rows, all white text.
-    Row(
-        modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(start = 12.dp, top = 8.dp, end = 56.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
-    ) {
+    // Top-left Picture-in-Picture button.
+    if (onEnterPip != null) {
         Box(
             modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(Twick.Accent),
-            contentAlignment = Alignment.Center
+                .align(Alignment.TopStart)
+                .padding(start = 6.dp, top = 6.dp)
         ) {
-            if (!channel?.profileImageUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = channel?.profileImageUrl,
-                    contentDescription = displayName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Text(
-                    text = displayName.firstOrNull()?.uppercase() ?: "?",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = displayName,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (channel?.isPartner == true) {
-                    Icon(
-                        imageVector = Icons.Filled.Verified,
-                        contentDescription = "Partner",
-                        tint = Twick.Accent,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
-            }
-            channel?.title?.takeIf { it.isNotBlank() }?.let { title ->
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if ((channel?.viewerCount ?: 0) > 0) {
-                Text(
-                    text = "${formatViewerCount(channel?.viewerCount ?: 0)} viewers",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            StreamIconButton(
+                icon = Icons.Filled.PictureInPictureAlt,
+                contentDescription = "Picture in picture",
+                onClick = onEnterPip
+            )
         }
     }
 
@@ -572,7 +674,7 @@ private fun BoxScope.PlayerFocusOverlay(
     }
 
     // Bottom-end controls — fully transparent toolbar.
-    // Order: Settings, Volume, [Theater if fullscreen or theater], Fullscreen.
+    // Order: Settings, Volume, [Theater only in fullscreen], Fullscreen.
     Box(
         modifier = Modifier
             .align(Alignment.BottomEnd)
@@ -594,11 +696,9 @@ private fun BoxScope.PlayerFocusOverlay(
                 contentDescription = if (muted) "Unmute" else "Mute",
                 onClick = onMuteToggle
             )
-            // Theater button: shown whenever the player is in fullscreen or
-            // already in theater mode (so the user can toggle it off).
-            if (onTheaterToggle != null && (fullscreen || theaterMode)) {
+            if (onTheaterToggle != null && fullscreen) {
                 StreamIconButton(
-                    icon = Icons.Filled.VideoLabel,
+                    icon = TheaterModeIcon,
                     contentDescription = if (theaterMode) "Exit theater mode" else "Theater mode",
                     selected = theaterMode,
                     onClick = onTheaterToggle
@@ -622,6 +722,22 @@ private fun BoxScope.PlayerFocusOverlay(
             }
         }
     }
+}
+
+@Composable
+private fun AdPlaybackBadge(
+    adInfo: AdPlaybackInfo,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = adInfo.label,
+        color = Color.White,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.52f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+    )
 }
 
 @Composable
@@ -668,6 +784,7 @@ private fun QualityRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val haptic = rememberSoftHaptic()
     Text(
         text = label,
         color = if (selected) Twick.Accent else Color.White,
@@ -675,7 +792,10 @@ private fun QualityRow(
         fontSize = 12.sp,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable {
+                if (!selected) haptic()
+                onClick()
+            }
             .padding(horizontal = 18.dp, vertical = 8.dp)
     )
 }
@@ -704,13 +824,17 @@ private fun StreamFullscreenPlaceholder(
 
 @Composable
 private fun StreamIconButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     contentDescription: String,
     selected: Boolean = false,
     onClick: () -> Unit
 ) {
+    val haptic = rememberSoftHaptic()
     IconButton(
-        onClick = onClick,
+        onClick = {
+            haptic()
+            onClick()
+        },
         modifier = Modifier.size(32.dp)
     ) {
         Icon(
@@ -721,6 +845,91 @@ private fun StreamIconButton(
         )
     }
 }
+
+@Composable
+private fun ImmersiveFullscreenEffect(enabled: Boolean) {
+    val view = LocalView.current
+    val activity = LocalActivity.current as? Activity
+
+    DisposableEffect(enabled, view, activity) {
+        if (!enabled) {
+            onDispose { }
+        } else {
+            val dialogWindow = (view.parent as? DialogWindowProvider)?.window
+            val windows = listOfNotNull(dialogWindow, activity?.window).distinct()
+            val controllers = windows.map { window ->
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    hide(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+
+            onDispose {
+                controllers.forEach { it.show(WindowInsetsCompat.Type.systemBars()) }
+            }
+        }
+    }
+}
+
+private val TheaterModeIcon: ImageVector
+    get() {
+        if (_theaterModeIcon != null) return _theaterModeIcon!!
+        _theaterModeIcon = ImageVector.Builder(
+            name = "TheaterMode",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(3f, 5f)
+                lineTo(15f, 5f)
+                lineTo(15f, 7f)
+                lineTo(3f, 7f)
+                close()
+                moveTo(3f, 17f)
+                lineTo(15f, 17f)
+                lineTo(15f, 19f)
+                lineTo(3f, 19f)
+                close()
+                moveTo(3f, 5f)
+                lineTo(5f, 5f)
+                lineTo(5f, 19f)
+                lineTo(3f, 19f)
+                close()
+                moveTo(13f, 5f)
+                lineTo(15f, 5f)
+                lineTo(15f, 19f)
+                lineTo(13f, 19f)
+                close()
+                moveTo(17f, 8f)
+                lineTo(22f, 8f)
+                lineTo(22f, 10f)
+                lineTo(17f, 10f)
+                close()
+                moveTo(17f, 14f)
+                lineTo(22f, 14f)
+                lineTo(22f, 16f)
+                lineTo(17f, 16f)
+                close()
+                moveTo(17f, 8f)
+                lineTo(19f, 8f)
+                lineTo(19f, 16f)
+                lineTo(17f, 16f)
+                close()
+                moveTo(20f, 8f)
+                lineTo(22f, 8f)
+                lineTo(22f, 16f)
+                lineTo(20f, 16f)
+                close()
+            }
+        }.build()
+        return _theaterModeIcon!!
+    }
+
+private var _theaterModeIcon: ImageVector? = null
 
 private fun com.example.chatterinomobile.data.model.Channel?.displayNameOrLogin(login: String): String =
     this?.displayName?.takeIf { it.isNotBlank() } ?: login
@@ -737,6 +946,7 @@ private fun StreamPoster(
     modifier: Modifier = Modifier
 ) {
     val channel = activeChannel.channel
+    val haptic = rememberSoftHaptic()
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -772,7 +982,10 @@ private fun StreamPoster(
         ) {
             IconButton(
                 enabled = actionEnabled,
-                onClick = onAction,
+                onClick = {
+                    haptic()
+                    onAction()
+                },
                 modifier = Modifier
                     .size(44.dp)
                     .background(

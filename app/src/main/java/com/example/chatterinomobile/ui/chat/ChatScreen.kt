@@ -1,6 +1,12 @@
 package com.example.chatterinomobile.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import android.graphics.Rect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,13 +39,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,8 +63,10 @@ import com.example.chatterinomobile.ui.chat.components.ChatList
 import com.example.chatterinomobile.ui.chat.components.CompletionItem
 import com.example.chatterinomobile.ui.chat.components.EmoteInsertion
 import com.example.chatterinomobile.ui.chat.components.EmotePickerSheet
+import com.example.chatterinomobile.MainActivity
 import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
 import com.example.chatterinomobile.ui.player.TwitchStreamStage
+import androidx.activity.compose.LocalActivity
 import com.example.chatterinomobile.ui.theme.Twick
 import coil.compose.AsyncImage
 
@@ -92,6 +104,8 @@ fun ChatRoute(
         },
         onEmotePickerOpen = chatViewModel::refreshEmoteCatalog,
         onSend = chatViewModel::sendMessage,
+        onCancelReply = chatViewModel::cancelReply,
+        onReplyToMessage = chatViewModel::beginReply,
         onBack = {
             streamPlayerViewModel.clear()
             chatViewModel.stopActiveChannel()
@@ -123,23 +137,26 @@ fun ChatScreen(
     onAutocompleteQueryChanged: (AutocompleteQuery?) -> Unit,
     onEmotePickerOpen: () -> Unit,
     onSend: (String) -> Unit,
+    onCancelReply: () -> Unit,
+    onReplyToMessage: (com.example.chatterinomobile.data.model.ChatMessage) -> Unit,
     onBack: () -> Unit
 ) {
     val canSend = activeChannel.channelLogin != null && isLoggedIn
     val hint = composeHint(activeChannel, isLoggedIn)
     val focusManager = LocalFocusManager.current
 
-    var pickerOpen by remember { mutableStateOf(false) }
+    var pickerOpen by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(false) }
     var pendingInsertion by remember { mutableStateOf<EmoteInsertion?>(null) }
-    var theaterMode by remember(activeChannel.channelLogin) { mutableStateOf(false) }
-    var videoVisible by remember(activeChannel.channelLogin) { mutableStateOf(true) }
-    var chatFullscreen by remember(activeChannel.channelLogin) { mutableStateOf(false) }
-    var verticalPlayerFraction by remember(activeChannel.channelLogin) {
+    var theaterMode by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(false) }
+    var videoVisible by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(true) }
+    var chatFullscreen by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(false) }
+    var verticalPlayerFraction by rememberSaveable(activeChannel.channelLogin) {
         mutableStateOf(DEFAULT_VERTICAL_PLAYER_FRACTION)
     }
-    var horizontalPlayerFraction by remember(activeChannel.channelLogin) {
+    var horizontalPlayerFraction by rememberSaveable(activeChannel.channelLogin) {
         mutableStateOf(DEFAULT_HORIZONTAL_PLAYER_FRACTION)
     }
+    var playerChromeVisible by remember(activeChannel.channelLogin) { mutableStateOf(false) }
     val channelIsKnownOffline = activeChannel.channel?.isLive == false
 
     LaunchedEffect(activeChannel.channelLogin, channelIsKnownOffline) {
@@ -172,6 +189,16 @@ fun ChatScreen(
         restoreDefaultPlayer()
     }
 
+    val activity = LocalActivity.current
+    var playerPipSourceRect by remember { mutableStateOf<Rect?>(null) }
+    val onEnterPip: ((Rect?) -> Unit)? = remember(activity) {
+        (activity as? MainActivity)?.let { mainActivity ->
+            { sourceRectHint: Rect? ->
+                mainActivity.enterPlayerPip(sourceRectHint ?: playerPipSourceRect)
+            }
+        }
+    }
+
     val autocompleteResults: List<CompletionItem> = when (autocompleteState) {
         is EmoteAutocompleteState.Emotes -> autocompleteState.results.map(CompletionItem::Emote)
         is EmoteAutocompleteState.Users -> autocompleteState.results.map(CompletionItem::User)
@@ -201,6 +228,7 @@ fun ChatScreen(
                 activeChannel = activeChannel,
                 authLogin = authLogin,
                 focusManager = focusManager,
+                onReplyToMessage = onReplyToMessage,
                 modifier = Modifier.weight(1f)
             )
             ChatInputBar(
@@ -209,6 +237,8 @@ fun ChatScreen(
                 message = state.sendErrorMessage,
                 messageIsError = state.sendErrorMessage != null,
                 onSend = onSend,
+                pendingReply = state.pendingReply,
+                onCancelReply = onCancelReply,
                 autocompleteResults = autocompleteResults,
                 onAutocompleteQueryChanged = onAutocompleteQueryChanged,
                 onEmotePicker = {
@@ -228,20 +258,29 @@ fun ChatScreen(
                 val chatWidth = maxWidth - playerWidth - THEATER_RESIZE_HANDLE_WIDTH
                 val availableWidth = maxWidth.value.coerceAtLeast(1f)
                 Row(modifier = Modifier.fillMaxSize()) {
-                    TwitchStreamStage(
-                        activeChannel = activeChannel,
-                        playerViewModel = streamPlayerViewModel,
-                        theaterMode = true,
-                        onTheaterToggle = { theaterMode = false },
-                        videoVisible = videoVisible,
-                        onVideoVisibleChange = { visible ->
-                            if (visible) videoVisible = true else enterChatFullscreen()
-                        },
-                        fillBounds = true,
+                    Column(
                         modifier = Modifier
                             .width(playerWidth.coerceAtLeast(0.dp))
                             .fillMaxHeight()
-                    )
+                    ) {
+                        TwitchStreamStage(
+                            activeChannel = activeChannel,
+                            playerViewModel = streamPlayerViewModel,
+                            theaterMode = true,
+                            onTheaterToggle = { theaterMode = false },
+                            videoVisible = videoVisible,
+                            onVideoVisibleChange = { visible ->
+                                if (visible) videoVisible = true else enterChatFullscreen()
+                            },
+                            onEnterPip = onEnterPip,
+                            onPlayerBoundsChanged = { playerPipSourceRect = it },
+                            onFocusOverlayVisibleChange = { playerChromeVisible = it },
+                            fillBounds = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight()
+                        )
+                    }
                     ResizeHandle(
                         orientation = ResizeHandleOrientation.Vertical,
                         modifier = Modifier
@@ -264,13 +303,16 @@ fun ChatScreen(
                             .width(chatWidth.coerceAtLeast(0.dp))
                             .fillMaxHeight()
                     ) {
-                        ChatBackBar(onBack = onBack)
+                        if (!playerChromeVisible) {
+                            ChatBackBar(onBack = onBack)
+                        }
                         ChatMessagePane(
                             state = state,
                             messages = messages,
                             activeChannel = activeChannel,
                             authLogin = authLogin,
                             focusManager = focusManager,
+                            onReplyToMessage = onReplyToMessage,
                             modifier = Modifier.weight(1f)
                         )
                         ChatInputBar(
@@ -279,6 +321,8 @@ fun ChatScreen(
                             message = state.sendErrorMessage,
                             messageIsError = state.sendErrorMessage != null,
                             onSend = onSend,
+                            pendingReply = state.pendingReply,
+                            onCancelReply = onCancelReply,
                             autocompleteResults = autocompleteResults,
                             onAutocompleteQueryChanged = onAutocompleteQueryChanged,
                             onEmotePicker = {
@@ -289,6 +333,16 @@ fun ChatScreen(
                             onInsertEmoteRequestConsumed = { pendingInsertion = null }
                         )
                     }
+                }
+                if (playerChromeVisible) {
+                    ChatPlayerMetaOverlay(
+                        activeChannel = activeChannel,
+                        onBack = onBack,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(x = playerWidth + THEATER_RESIZE_HANDLE_WIDTH + 8.dp, y = 8.dp)
+                            .width((chatWidth - 16.dp).coerceAtLeast(0.dp))
+                    )
                 }
             }
         } else {
@@ -311,6 +365,9 @@ fun ChatScreen(
                         onVideoVisibleChange = { visible ->
                             if (visible) videoVisible = true else enterChatFullscreen()
                         },
+                        onEnterPip = onEnterPip,
+                        onPlayerBoundsChanged = { playerPipSourceRect = it },
+                        onFocusOverlayVisibleChange = { playerChromeVisible = it },
                         fillBounds = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -333,14 +390,28 @@ fun ChatScreen(
                             }
                         }
                     )
-                    ChatBackBar(onBack = onBack)
+                    if (!playerChromeVisible) {
+                        ChatBackBar(onBack = onBack)
+                    }
                     ChatMessagePane(
                         state = state,
                         messages = messages,
                         activeChannel = activeChannel,
                         authLogin = authLogin,
                         focusManager = focusManager,
+                        onReplyToMessage = onReplyToMessage,
                         modifier = Modifier.weight(1f)
+                    )
+                }
+                if (playerChromeVisible) {
+                    ChatPlayerMetaOverlay(
+                        activeChannel = activeChannel,
+                        onBack = onBack,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(y = playerHeight - 2.dp)
+                            .padding(horizontal = 10.dp)
+                            .fillMaxWidth()
                     )
                 }
             }
@@ -350,6 +421,8 @@ fun ChatScreen(
                 message = state.sendErrorMessage,
                 messageIsError = state.sendErrorMessage != null,
                 onSend = onSend,
+                pendingReply = state.pendingReply,
+                onCancelReply = onCancelReply,
                 autocompleteResults = autocompleteResults,
                 onAutocompleteQueryChanged = onAutocompleteQueryChanged,
                 onEmotePicker = {
@@ -375,6 +448,147 @@ fun ChatScreen(
             }
         )
     }
+}
+
+@Composable
+private fun ChatPlayerMetaOverlay(
+    activeChannel: ActiveChannelState,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val channel = activeChannel.channel
+    val channelLogin = activeChannel.channelLogin ?: return
+    val displayName = channel?.displayName?.takeIf { it.isNotBlank() } ?: channelLogin
+    val streamTitle = channel?.title?.takeIf { it.isNotBlank() }
+    val category = channel?.gameName?.takeIf { it.isNotBlank() }
+    val viewers = channel?.viewerCount
+        ?.takeIf { it > 0 }
+        ?.let { "${formatViewerCount(it)} viewers" }
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.46f), RoundedCornerShape(10.dp))
+            .padding(start = 2.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(Twick.Accent),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!channel?.profileImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = channel?.profileImageUrl,
+                    contentDescription = displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text(
+                    text = displayName.firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayName,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (channel?.isPartner == true) {
+                    Icon(
+                        imageVector = Icons.Filled.Verified,
+                        contentDescription = "Partner",
+                        tint = Twick.Accent,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+            if (streamTitle != null) {
+                Text(
+                    text = streamTitle,
+                    color = Color.White.copy(alpha = 0.84f),
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp
+                )
+            }
+            if (category != null) {
+                Text(
+                    text = category,
+                    color = Color.White.copy(alpha = 0.66f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (viewers != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                PulsingLiveDot()
+                Text(
+                    text = viewers,
+                    color = Color.White.copy(alpha = 0.78f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PulsingLiveDot(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "chatLiveDot")
+    val alpha by transition.animateFloat(
+        initialValue = 0.42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 820),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "chatLiveDotAlpha"
+    )
+    Box(
+        modifier = modifier
+            .size(7.dp)
+            .graphicsLayer {
+                this.alpha = alpha
+                scaleX = 0.86f + alpha * 0.14f
+                scaleY = 0.86f + alpha * 0.14f
+            }
+            .background(Color(0xFFFF3B30), CircleShape)
+    )
 }
 
 private enum class ResizeHandleOrientation {
@@ -424,6 +638,7 @@ private fun ChatMessagePane(
     activeChannel: ActiveChannelState,
     authLogin: String?,
     focusManager: FocusManager,
+    onReplyToMessage: (com.example.chatterinomobile.data.model.ChatMessage) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -436,7 +651,8 @@ private fun ChatMessagePane(
             paintsByUserId = state.paintsByUserId,
             showTimestamp = false,
             modifier = Modifier.fillMaxSize(),
-            currentUserLogin = activeChannel.userState?.login ?: authLogin
+            currentUserLogin = activeChannel.userState?.login ?: authLogin,
+            onReplyToMessage = onReplyToMessage
         )
     }
 }
@@ -571,6 +787,13 @@ private fun composeHint(active: ActiveChannelState, isLoggedIn: Boolean): String
     val constraint = describeRoomConstraint(active.roomState, active.userState)
     return if (constraint == null) "Send a message" else "Send a message ($constraint)"
 }
+
+private fun formatViewerCount(count: Int): String =
+    when {
+        count >= 1_000_000 -> "${count / 1_000_000}.${(count % 1_000_000) / 100_000}M"
+        count >= 1_000 -> "${count / 1_000}.${(count % 1_000) / 100}K"
+        else -> count.toString()
+    }
 
 private fun describeRoomConstraint(
     room: RoomState?,

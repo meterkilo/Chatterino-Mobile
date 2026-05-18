@@ -21,7 +21,8 @@
             android:label="@string/title_activity_main"
             android:launchMode="singleTask"
             android:supportsPictureInPicture="true"
-            android:theme="@style/Theme.SevenTVMobile.Starting">
+            android:theme="@style/Theme.SevenTVMobile.Starting"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

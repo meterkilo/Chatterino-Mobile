@@ -81,6 +81,7 @@ val repositoryModule = module {
             roomStateMapper = get(),
             userStateMapper = get(),
             enricher = get(),
+            recentMessagesApi = get(),
             channelRepository = get(),
             badgeRepository = get(),
             emoteRepository = get()
