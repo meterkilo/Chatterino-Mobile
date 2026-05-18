@@ -1,98 +1,60 @@
-# 7TV Mobile / Twick Android Rewrite
+# 7TV Mobile
 
-A native Android Twitch viewer client with integrated live streaming, built for low-latency chat and polished UX. Inspired by **Chatterino** and **Chatterino7**, built with **Kotlin** and **Jetpack Compose**.
+An Android Twitch client focused on stream playback, chat, and third-party emote support.
+
+The goal is to make Twitch chat feel less constrained on mobile while keeping the app native, responsive, and straightforward to work on. The chat behavior takes cues from desktop clients like Chatterino, especially around recent messages, replies, badges, emotes, and compact message rendering.
 
 ## Features
 
-### Chat & Streaming
-- **Native ExoPlayer HLS streaming** with ad support (plays through Twitch ads, no ad-free fallback)
-- **Low-latency Twitch chat** via WebSocket with auto-reconnect and emote rendering
-- **Quality selection** with dynamic m3u8-sourced quality labels
-- **Theater mode** (horizontal split) and vertical layouts with resizable dividers
-- **Chat moderation:** badges, verified indicator, reply threads, deletion state
-- **Emote support:** 7TV, BTTV, FFZ emotes with inline rendering
+- Watch Twitch livestreams with player controls, quality selection, fullscreen, theater mode, and picture-in-picture.
+- Connect to Twitch IRC for live chat, moderation events, replies, and recent messages on join.
+- Render Twitch, 7TV, BTTV, and FFZ emotes.
+- Browse live channels and categories.
+- Sign in with Twitch OAuth, with anonymous mode when auth is not configured.
+- Cache emotes, badges, paints, follow lists, and discovery snapshots to avoid unnecessary startup work.
 
-### UI/UX
-- **7TV Mobile branding** with holographic shimmer logo and refined wordmark
-- **Bottom navigation bar** with gradient fade into solid black (Home, Browse, You)
-- **Player overlay controls** (Settings/Quality, Mute, Theater, Fullscreen) with top/bottom gradients
-- **Back-to-restore button** for exiting the player (diagonal NorthWest icon)
-- **Compact chat messages** with username:message format (no extra spacing)
-- **Responsive layouts** (portrait, theater, chat-fullscreen) with smooth divider resizing
+## Project Status
 
-### Authentication
-- **Twitch OAuth device code flow** with custom URI scheme redirect
-- **Session persistence** via encrypted shared preferences
-- **Automatic token refresh** with fallback to re-auth
+This is actively being built and refactored. The core pieces are in place, but player edge cases, chat layout behavior, caching, and discovery performance are still being tuned.
 
-## Tech Stack
+## Tech
 
-| Component | Technology |
-|-----------|------------|
-| **UI Framework** | Jetpack Compose + Material3 |
-| **Video Playback** | Media3 (ExoPlayer 1.10) with HLS |
-| **Chat & Networking** | Ktor HTTP client + WebSocket, OkHttp |
-| **Reactive** | Kotlin Coroutines + Flow (StateFlow, SharedFlow) |
-| **Serialization** | kotlinx.serialization (JSON) |
-| **Dependency Injection** | Koin |
-| **Image Loading** | Coil (async image composables) |
-| **Storage** | Android SharedPreferences (encrypted) |
-| **Minimum API** | 28 (Android 9) |
+- Kotlin
+- Jetpack Compose
+- Media3 / ExoPlayer
+- Ktor + OkHttp
+- Kotlin Coroutines / Flow
+- Koin
+- Coil
 
-## Architecture
+## Setup
 
-### Layers
-- **UI** (`ui/`) — Jetpack Compose screens and components (player, chat, discovery, onboarding)
-- **Data** (`data/`) — Repository pattern, API clients, local state, models
-- **Dependency Injection** — Koin modules for viewmodels, repositories, clients
+Use the Gradle wrapper included in the repo.
 
-### Key Viewmodels
-- `StreamPlayerViewModel` — ExoPlayer setup, quality selection, mute state, playback lifecycle
-- `ChatViewModel` — WebSocket chat flow, message rendering, moderation state
-- `AuthViewModel` — OAuth device code flow, token management
-- `ChannelTabsViewModel` — Active channel state, joined channels list
+Expected local setup:
 
-## Building & Running
+- Android Studio
+- Gradle JVM compatible with Java 21
+- Android SDK 36
 
-### Prerequisites
-- **Android Studio** 2024.1+
-- **JDK** 17+
-- **Gradle** 8.3+
+Add a Twitch client ID to `local.properties` for authenticated Twitch features:
 
-### Setup
-1. Clone the repo
-2. Add your Twitch Developer Console **Client ID** to `local.properties`:
-   ```properties
-   twitchClientId=YOUR_CLIENT_ID_HERE
-   ```
-3. Ensure OAuth redirect URI is registered in Twitch Dev Console:
-   ```
-   chatterinomobile://oauth/twitch
-   ```
-4. Open in Android Studio and sync Gradle
-5. Run on emulator (API 28+) or physical device
+```properties
+twitchClientId=YOUR_CLIENT_ID
+```
 
-### Build Variants
-- **Debug** — Full logging, R8 disabled, debuggable
-- **Release** — Proguard/R8 minification, optimized
+The app uses this redirect URI for Twitch login:
 
-## Known Limitations
+```text
+chatterinomobile://oauth/twitch
+```
 
-- **Kick support** — Chat client structure supports Kick but streaming is Twitch-only
-- **Kotlin Multiplatform** — Currently Android-only; KMP architecture is a future goal
-- **Offline channels** — Player is hidden (shows poster with "Offline" label)
-- **VoD playback** — Not supported (live-only)
+Then build from Android Studio or run:
 
-## Roadmap
+```bash
+./gradlew :app:assembleDebug
+```
 
-- [ ] Channel points / bit alerts
-- [ ] Custom chat colors & user card UI
-- [ ] Settings screen (volume, layout defaults, theme)
-- [ ] iOS port via Kotlin Multiplatform
+## Notes
 
-## Credits
-
-Inspired by:
-- [Chatterino](https://github.com/Chatterino/chatterino2) — cross-platform Twitch chat
-- [Chatterino7](https://github.com/SevenTV/chatterino7) — SevenTV integrations
-- [Xtra](https://github.com/An2nDev/Xtra), [Twire](https://github.com/Twire-tv/Twire), [Frosty](https://github.com/mochadwi/frosty) — Android Twitch client optimizations
+This project references behavior from Chatterino and Android Twitch clients like Xtra where it makes sense, but the implementation is native Android rather than a port.
