@@ -186,7 +186,7 @@ fun DiscoveryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 78.dp)
+                    .padding(bottom = 64.dp)
             ) {
                 when {
                     state.isLoading && state.followedLive.isEmpty() && state.recommendedStreams.isEmpty() -> LoadingBody()
@@ -2536,12 +2536,12 @@ private fun DiscoveryBottomBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(132.dp)
+            .height(108.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
+                .height(32.dp)
                 .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
@@ -2552,7 +2552,7 @@ private fun DiscoveryBottomBar(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(92.dp)
+                .height(76.dp)
                 .align(Alignment.BottomCenter)
                 .background(Twick.Bg)
         )
@@ -2561,7 +2561,7 @@ private fun DiscoveryBottomBar(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 26.dp, end = 26.dp, top = 8.dp, bottom = 8.dp),
+                .padding(start = 26.dp, end = 26.dp, top = 4.dp, bottom = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
