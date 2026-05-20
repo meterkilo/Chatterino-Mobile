@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
                     )
 
                     !onboardingComplete -> OnboardingFlow(
+                        isLoading = authState.isLoading,
                         isLoggedIn = authState.isLoggedIn,
                         onConnectTwitch = authViewModel::startLogin,
                         onFinish = { onboardingComplete = true }

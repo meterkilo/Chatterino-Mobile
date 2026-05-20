@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.material3.Text
@@ -37,8 +38,10 @@ import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 
 @Composable
 internal fun HolographicSevenTvWordmark(
+    size: Dp = 56.dp,
     modifier: Modifier = Modifier
 ) {
+    val scale = size / 56.dp
     val transition = rememberInfiniteTransition(label = "holographicSevenTvWordmark")
     val shimmerPhase by transition.animateFloat(
         initialValue = -0.35f,
@@ -63,35 +66,78 @@ internal fun HolographicSevenTvWordmark(
 
     Box(
         modifier = modifier
-            .width(116.dp)
-            .height(56.dp)
+            .width(116.dp * scale)
+            .height(56.dp * scale)
     ) {
-        HolographicSevenTvLogo(
-            size = 56.dp,
-            floating = false,
-            shimmer = true,
-            contentScale = 0.88f,
-            opticalOffsetX = 0f,
-            opticalOffsetY = -0.02f,
-            modifier = Modifier.align(Alignment.CenterStart)
-        )
-        Text(
-            text = "mobile",
-            style = TextStyle(
-                brush = textBrush,
-                fontSize = 12.5.sp,
-                fontFamily = PublicSansFontFamily,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-0.7).sp
-            ),
+        Box(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = 41.dp, y = 29.dp)
+                .width(116.dp)
+                .height(56.dp)
                 .graphicsLayer {
-                    scaleX = 1.16f
-                    scaleY = 0.92f
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0f)
                 }
-        )
+        ) {
+            HolographicSevenTvLogo(
+                size = 56.dp,
+                floating = false,
+                shimmer = true,
+                contentScale = 0.88f,
+                opticalOffsetX = 0f,
+                opticalOffsetY = -0.02f,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            Text(
+                text = "mobile",
+                style = TextStyle(
+                    brush = textBrush,
+                    fontSize = 12.5.sp,
+                    fontFamily = PublicSansFontFamily,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-0.7).sp
+                ),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = 41.dp, y = 29.dp)
+                    .graphicsLayer {
+                        scaleX = 1.16f
+                        scaleY = 0.92f
+                    }
+            )
+        }
+    }
+}
+
+@Composable
+internal fun SolidSevenTvLogo(
+    size: Dp,
+    color: Color,
+    modifier: Modifier = Modifier,
+    contentScale: Float = 0.9f,
+    opticalOffsetX: Float = 0f,
+    opticalOffsetY: Float = 0f
+) {
+    val logoPaths = remember { sevenTvLogoPaths() }
+
+    Canvas(
+        modifier = modifier.size(size)
+    ) {
+        val scale = minOf(
+            this.size.width / LOGO_BOUNDS_WIDTH,
+            this.size.height / LOGO_BOUNDS_HEIGHT
+        ) * contentScale
+        val horizontalInset = this.size.width * (0.5f + opticalOffsetX) - LOGO_BOUNDS_CENTER_X * scale
+        val verticalInset = this.size.height * (0.5f + opticalOffsetY) - LOGO_BOUNDS_CENTER_Y * scale
+
+        withTransform({
+            translate(left = horizontalInset, top = verticalInset)
+            scale(scaleX = scale, scaleY = scale)
+        }) {
+            logoPaths.forEach { path ->
+                drawPath(path = path, color = color)
+            }
+        }
     }
 }
 

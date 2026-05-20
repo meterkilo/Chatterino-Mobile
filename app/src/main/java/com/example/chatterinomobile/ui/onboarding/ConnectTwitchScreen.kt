@@ -2,6 +2,7 @@ package com.example.chatterinomobile.ui.onboarding
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,9 +35,41 @@ internal fun ConnectTwitchScreen(
     onBack: () -> Unit,
     onConnect: () -> Unit
 ) {
+    val density = LocalDensity.current
+    val edgeWidthPx = with(density) { 32.dp.toPx() }
+    val backSwipeThresholdPx = with(density) { 72.dp.toPx() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(onBack) {
+                var startedAtEdge = false
+                var dragDistance = 0f
+
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        startedAtEdge = offset.x <= edgeWidthPx
+                        dragDistance = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        if (startedAtEdge) {
+                            dragDistance += dragAmount
+                            change.consume()
+                        }
+                    },
+                    onDragEnd = {
+                        if (startedAtEdge && dragDistance > backSwipeThresholdPx) {
+                            onBack()
+                        }
+                        startedAtEdge = false
+                        dragDistance = 0f
+                    },
+                    onDragCancel = {
+                        startedAtEdge = false
+                        dragDistance = 0f
+                    }
+                )
+            }
             .background(Twick.Bg)
     ) {
         Column(
@@ -42,7 +77,7 @@ internal fun ConnectTwitchScreen(
                 .fillMaxSize()
                 .padding(bottom = 110.dp)
         ) {
-            OnboardingAppBar(onBack = onBack)
+            OnboardingAppBar(onBack = onBack, showBack = false)
 
             Column(
                 modifier = Modifier
@@ -103,15 +138,7 @@ private fun TwitchAccountCard() {
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Twick.S2),
-            contentAlignment = Alignment.Center
-        ) {
-            TwitchLogo(size = 26.dp)
-        }
+        TwitchLogo(size = 36.dp)
 
         Spacer(Modifier.width(14.dp))
 
@@ -155,7 +182,7 @@ private fun ScopeNote() {
             .padding(14.dp)
     ) {
         Text(
-            text = "THIS WILL ALLOW TWITCH TO",
+            text = "THIS WILL ALLOW 7TV TO",
             color = Twick.Ink3,
             fontSize = 11.sp,
             letterSpacing = 0.66.sp,

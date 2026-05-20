@@ -1,6 +1,7 @@
 package com.example.chatterinomobile.ui.onboarding
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,39 +23,42 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.chatterinomobile.ui.brand.HolographicSevenTvLogo
+import com.example.chatterinomobile.ui.brand.HolographicSevenTvWordmark
+import com.example.chatterinomobile.ui.brand.SolidSevenTvLogo
 import com.example.chatterinomobile.ui.theme.Twick
 
+internal val OnboardingAccent = Twick.Accent
+
+@Preview
 @Composable
-internal fun BrandMark(
-    size: Dp,
-    cornerRadius: Dp,
-    glyphSize: Dp,
-    modifier: Modifier = Modifier
-) {
+internal fun BrandMark() {
     Box(
-        modifier = modifier
-            .size(size)
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(Twick.S1),
+        modifier = Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Twick.PurpleGradient)
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp)),
         contentAlignment = Alignment.Center
     ) {
-        HolographicSevenTvLogo(
-            size = glyphSize,
-            floating = false,
-            shimmer = true,
-            contentScale = 0.78f
+        SolidSevenTvLogo(
+            size = 48.dp,
+            color = Color.White,
+            contentScale = .8f,
+            opticalOffsetX = -.015f,
+            opticalOffsetY = 0f
         )
     }
 }
+
 
 @Composable
 internal fun OnboardingAppBar(
     onBack: () -> Unit,
     title: String = "",
+    showBack: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -64,19 +68,21 @@ internal fun OnboardingAppBar(
             .padding(top = 56.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Twick.Ink,
-                modifier = Modifier.size(20.dp)
-            )
+        if (showBack) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Twick.Ink,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         if (title.isNotEmpty()) {
@@ -85,6 +91,10 @@ internal fun OnboardingAppBar(
                 color = Twick.Ink,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        } else {
+            HolographicSevenTvWordmark(
                 modifier = Modifier.padding(start = 4.dp)
             )
         }

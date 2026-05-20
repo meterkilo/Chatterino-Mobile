@@ -3,22 +3,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 7TV logo, scaled from 128x128 SVG to fit 72x72 safe zone centered at 54,54 -->
-    <group
-        android:pivotX="54"
-        android:pivotY="54"
-        android:translateX="18"
-        android:translateY="22"
-        android:scaleX="0.5625"
-        android:scaleY="0.5625">
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M90.986,45.953L95.92,37.35L98.584,32.801L93.65,24.198V24H67.304L77.171,41.206L79.934,45.953H90.986Z" />
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M36.616,103.703L66.218,52.084L69.869,45.755L60.002,28.549L57.239,24.099H15.598L10.664,32.702L8,37.251L12.934,45.854V46.052H44.51L19.841,89.068L16.387,95.199L21.321,103.802V104H36.616" />
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M77.862,103.703H92.959L112.694,69.29L116.148,63.357L111.214,54.754V54.556H96.018L86.151,71.762L85.46,73.048L75.592,55.842L74.902,54.556L65.034,71.762L62.272,76.509L77.073,102.318L77.862,103.703Z" />
-    </group>
+    <path
+        android:fillColor="#E6FFB8"
+        android:pathData="M73.248,41.985L76.533,36.258L78.307,33.229L75.022,27.502V27.37H57.482L64.051,38.825L65.89,41.985H73.248Z" />
+    <path
+        android:fillColor="#BDFBE8"
+        android:pathData="M37.051,80.432L56.759,46.067L59.19,41.853L52.621,30.398L50.781,27.436H23.058L19.774,33.163L18,36.192L21.285,41.919V42.051H42.307L25.883,70.689L23.584,74.771L26.869,80.498V80.63H37.051" />
+    <path
+        android:fillColor="#F6B8EF"
+        android:pathData="M64.511,80.432H74.562L87.7,57.522L90,53.572L86.715,47.844V47.713H76.598L70.029,59.168L69.569,60.024L63,48.569L62.54,47.713L55.971,59.168L54.132,62.328L63.986,79.51L64.511,80.432Z" />
 </vector>

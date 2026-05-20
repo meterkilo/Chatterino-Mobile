@@ -50,9 +50,9 @@ internal fun WelcomeScreen(onGetStarted: () -> Unit) {
                 .padding(horizontal = 28.dp)
                 .padding(top = 60.dp, bottom = 140.dp)
         ) {
-            BrandMark(size = 48.dp, cornerRadius = 12.dp, glyphSize = 26.dp)
+            BrandMark()
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(23.dp))
 
             Text(
                 text = headline(),
@@ -66,7 +66,7 @@ internal fun WelcomeScreen(onGetStarted: () -> Unit) {
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = "A lightweight chat client for Twitch & Kick with native 7TV, " +
+                text = "A lightweight viewing client for Twitch & Kick with native 7TV, " +
                         "BetterTTV and FrankerFaceZ emote support.",
                 color = Twick.Ink2,
                 fontSize = 14.sp,
@@ -93,16 +93,16 @@ internal fun WelcomeScreen(onGetStarted: () -> Unit) {
 
 private fun headline(): AnnotatedString = buildAnnotatedString {
     append("Every emote.\nEvery stream.\n")
-    withStyle(SpanStyle(color = Twick.Accent)) { append("Half the battery.") }
+    withStyle(SpanStyle(color = OnboardingAccent)) { append("Half the battery.") }
 }
 
 @Composable
 private fun ValueProps() {
     val props = listOf(
         ValueProp(Icons.Default.AutoAwesome, "Third-party emotes", "7TV · BTTV · FFZ — global & per-channel"),
-        ValueProp(Icons.Default.Bolt, "Low-latency mode", "IRC-direct chat with ~300ms delivery"),
+        ValueProp(Icons.Default.Bolt, "Low-latency", "Fast and responsive chat experience with validated message sending"),
         ValueProp(Icons.Default.Visibility, "Chat-only playback", "Follow the conversation with no video"),
-        ValueProp(Icons.Default.Shield, "No trackers", "Open-source, no analytics, no ads")
+        ValueProp(Icons.Default.Shield, "No trackers", "Open-source, no analytics, no personal data collected")
     )
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         props.forEach { ValuePropRow(it) }

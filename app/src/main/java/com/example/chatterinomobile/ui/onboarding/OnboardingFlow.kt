@@ -11,17 +11,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 
 @Composable
 fun OnboardingFlow(
+    isLoading: Boolean,
     isLoggedIn: Boolean,
     onConnectTwitch: () -> Unit,
     onFinish: () -> Unit
 ) {
     var step by rememberSaveable { mutableStateOf(OnboardingStep.Splash) }
+    val currentIsLoggedIn by rememberUpdatedState(isLoggedIn)
 
 
 
@@ -31,7 +34,7 @@ fun OnboardingFlow(
             delay(1200)
 
 
-            step = if (isLoggedIn) OnboardingStep.EmoteSync else OnboardingStep.Welcome
+            step = if (currentIsLoggedIn) OnboardingStep.EmoteSync else OnboardingStep.Welcome
         }
     }
 
@@ -43,6 +46,11 @@ fun OnboardingFlow(
         if (isLoggedIn && step == OnboardingStep.ConnectTwitch) {
             step = OnboardingStep.EmoteSync
         }
+    }
+
+    if (isLoading && step != OnboardingStep.Splash) {
+        SplashScreen(showWordmark = false)
+        return
     }
 
     AnimatedContent(
@@ -58,7 +66,7 @@ fun OnboardingFlow(
         label = "onboarding"
     ) { current ->
         when (current) {
-            OnboardingStep.Splash -> SplashScreen()
+            OnboardingStep.Splash -> SplashScreen(showWordmark = true)
             OnboardingStep.Welcome -> WelcomeScreen(
                 onGetStarted = { step = OnboardingStep.ConnectTwitch }
             )
