@@ -35,10 +35,13 @@ import com.example.chatterinomobile.ui.chat.ChatViewModel
 import com.example.chatterinomobile.ui.discovery.DiscoveryLoadingScreen
 import com.example.chatterinomobile.ui.discovery.DiscoveryScreen
 import com.example.chatterinomobile.ui.onboarding.OnboardingFlow
+import com.example.chatterinomobile.ui.onboarding.OnboardingStep
+import com.example.chatterinomobile.ui.onboarding.SplashScreen
 import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
 import com.example.chatterinomobile.ui.player.TwitchStreamStage
 import com.example.chatterinomobile.ui.settings.SettingsViewModel
 import com.example.chatterinomobile.ui.theme.ChatterinoMobileTheme
+import kotlinx.coroutines.delay
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 class MainActivity : ComponentActivity() {
@@ -76,14 +79,27 @@ class MainActivity : ComponentActivity() {
             val activeChannel by tabsViewModel.activeChannel.collectAsState()
             val joinedChannels by tabsViewModel.joinedChannels.collectAsState()
 
+            var launchSplashVisible by rememberSaveable { mutableStateOf(true) }
             var onboardingComplete by rememberSaveable { mutableStateOf(false) }
+            var loginOnboardingVisible by rememberSaveable { mutableStateOf(false) }
             val isCompletingOAuth = authState.isAwaitingAuthorization && authState.isLoading
-            val showMainApp = onboardingComplete || (authState.isLoggedIn && !authState.isLoading)
-            LaunchedEffect(authState.isLoggedIn, authState.isLoading) {
+            val showMainApp = authState.isGuest ||
+                onboardingComplete ||
+                (authState.isLoggedIn && !authState.isLoading)
+
+            LaunchedEffect(Unit) {
+                delay(LAUNCH_SPLASH_MIN_DURATION_MILLIS)
+                launchSplashVisible = false
+            }
+
+            LaunchedEffect(authState.isLoggedIn, authState.isGuest, authState.isLoading) {
                 if (authState.isLoggedIn && !authState.isLoading && !onboardingComplete) {
                     onboardingComplete = true
                 }
-                if (!authState.isLoggedIn && !authState.isLoading && onboardingComplete) {
+                if (authState.isLoggedIn) {
+                    loginOnboardingVisible = false
+                }
+                if (!authState.isLoggedIn && !authState.isGuest && !authState.isLoading && onboardingComplete) {
                     onboardingComplete = false
                 }
             }
@@ -115,6 +131,8 @@ class MainActivity : ComponentActivity() {
 
             ChatterinoMobileTheme {
                 when {
+                    launchSplashVisible -> SplashScreen(showWordmark = true)
+
                     playerOnlyPipMode && activeChannel.channelLogin != null -> TwitchStreamStage(
                         activeChannel = activeChannel,
                         playerViewModel = streamPlayerViewModel,
@@ -124,6 +142,24 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize()
                     )
 
+                    loginOnboardingVisible && !authState.isLoggedIn -> {
+                        if (isCompletingOAuth) {
+                            DiscoveryLoadingScreen()
+                        } else {
+                            OnboardingFlow(
+                                isLoading = authState.isLoading,
+                                isLoggedIn = authState.isLoggedIn,
+                                onConnectTwitch = authViewModel::startLogin,
+                                onFinish = {
+                                    onboardingComplete = true
+                                    loginOnboardingVisible = false
+                                },
+                                initialStep = OnboardingStep.ConnectTwitch,
+                                onDismiss = { loginOnboardingVisible = false }
+                            )
+                        }
+                    }
+
                     !showMainApp -> {
                         if (isCompletingOAuth) {
                             DiscoveryLoadingScreen()
@@ -132,7 +168,8 @@ class MainActivity : ComponentActivity() {
                                 isLoading = authState.isLoading,
                                 isLoggedIn = authState.isLoggedIn,
                                 onConnectTwitch = authViewModel::startLogin,
-                                onFinish = { onboardingComplete = true }
+                                onFinish = { onboardingComplete = true },
+                                onContinueAsGuest = authViewModel::continueAsGuest
                             )
                         }
                     }
@@ -150,8 +187,13 @@ class MainActivity : ComponentActivity() {
                             composable(Routes.Discovery) {
                                 DiscoveryScreen(
                                     pinnedChannelLogins = joinedChannels,
+                                    isLoggedIn = authState.isLoggedIn,
+                                    authLogin = authState.login,
+                                    initialTab = if (authState.isGuest && !authState.isLoggedIn) 1 else 0,
+                                    initialBrowseTab = if (authState.isGuest && !authState.isLoggedIn) 1 else 0,
                                     onJoinChannel = tabsViewModel::joinChannel,
                                     onRemovePin = tabsViewModel::leaveChannel,
+                                    onLogin = { loginOnboardingVisible = true },
                                     onLogout = authViewModel::logout,
                                     onClearCache = settingsViewModel::clearCache
                                 )
@@ -164,6 +206,7 @@ class MainActivity : ComponentActivity() {
                                     isLoggedIn = authState.isLoggedIn,
                                     authUserId = authState.userId,
                                     authLogin = authState.login,
+                                    onLoginToChat = { loginOnboardingVisible = true },
                                     onBack = { navController.popBackStack() }
                                 )
                             }
@@ -218,3 +261,5 @@ private object Routes {
     const val Discovery = "discovery"
     const val Chat = "chat"
 }
+
+private const val LAUNCH_SPLASH_MIN_DURATION_MILLIS = 1500L

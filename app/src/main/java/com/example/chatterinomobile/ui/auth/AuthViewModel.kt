@@ -2,6 +2,7 @@ package com.example.chatterinomobile.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.chatterinomobile.data.local.ViewerSessionStore
 import com.example.chatterinomobile.data.model.TwitchImplicitAuthResult
 import com.example.chatterinomobile.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,7 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class AuthViewModel(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val viewerSessionStore: ViewerSessionStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState(isLoading = true))
@@ -35,6 +37,21 @@ class AuthViewModel(
                 isLoading = false,
                 isAwaitingAuthorization = true,
                 authorizeUrl = url,
+                errorMessage = null,
+                successMessage = null
+            )
+        }
+    }
+
+    fun continueAsGuest() {
+        viewerSessionStore.setGuestViewer(true)
+        update {
+            copy(
+                isLoading = false,
+                isLoggedIn = false,
+                isGuest = true,
+                isAwaitingAuthorization = false,
+                authorizeUrl = null,
                 errorMessage = null,
                 successMessage = null
             )
@@ -98,6 +115,7 @@ class AuthViewModel(
         viewModelScope.launch {
             runCatching {
                 authRepository.clearSession()
+                viewerSessionStore.setGuestViewer(true)
                 refreshSession(successMessage = "Logged out.")
             }.onFailure {
                 update { copy(errorMessage = it.message ?: "Logout failed") }
@@ -114,10 +132,15 @@ class AuthViewModel(
         val token = authRepository.getAccessToken()
         val login = authRepository.getLogin()
         val userId = authRepository.getUserId()
+        val isLoggedIn = token != null
+        if (isLoggedIn) {
+            viewerSessionStore.setGuestViewer(false)
+        }
         update {
             copy(
                 isLoading = false,
-                isLoggedIn = token != null,
+                isLoggedIn = isLoggedIn,
+                isGuest = !isLoggedIn && viewerSessionStore.isGuestViewer(),
                 login = login,
                 userId = userId,
                 isAwaitingAuthorization = false,
@@ -135,6 +158,7 @@ class AuthViewModel(
 data class AuthUiState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
+    val isGuest: Boolean = false,
     val isAwaitingAuthorization: Boolean = false,
     val login: String? = null,
     val userId: String? = null,

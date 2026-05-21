@@ -44,6 +44,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -80,6 +81,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -128,20 +130,26 @@ import com.example.chatterinomobile.ui.common.rememberSoftHaptic
 import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
 fun DiscoveryScreen(
     onJoinChannel: (String) -> Unit,
     onRemovePin: (String) -> Unit = {},
+    onLogin: () -> Unit = {},
     onLogout: () -> Unit = {},
     onClearCache: () -> Unit = {},
+    isLoggedIn: Boolean = false,
+    authLogin: String? = null,
+    initialTab: Int = 0,
+    initialBrowseTab: Int = 0,
     modifier: Modifier = Modifier,
     pinnedChannelLogins: List<String> = emptyList(),
     viewModel: DiscoveryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    var activeTab by rememberSaveable { mutableIntStateOf(0) }
+    var activeTab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
 
     LaunchedEffect(pinnedChannelLogins) {
         viewModel.hydratePinnedChannels(pinnedChannelLogins)
@@ -205,9 +213,13 @@ fun DiscoveryScreen(
                             onOpenCategory = viewModel::openCategory,
                             onCloseCategory = viewModel::closeCategory,
                             isRefreshing = state.isRefreshing,
-                            onRefresh = viewModel::refresh
+                            onRefresh = viewModel::refresh,
+                            initialTab = initialBrowseTab
                         )
                         2 -> YouBody(
+                            isLoggedIn = isLoggedIn,
+                            authLogin = authLogin,
+                            onLogin = onLogin,
                             onLogout = onLogout,
                             onClearCache = onClearCache
                         )
@@ -217,7 +229,8 @@ fun DiscoveryScreen(
                             onOpenCategory = viewModel::openCategory,
                             onCloseCategory = viewModel::closeCategory,
                             isRefreshing = state.isRefreshing,
-                            onRefresh = viewModel::refresh
+                            onRefresh = viewModel::refresh,
+                            initialTab = initialBrowseTab
                         )
                     }
                 }
@@ -2108,6 +2121,9 @@ private fun AddPinFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 private fun YouBody(
+    isLoggedIn: Boolean,
+    authLogin: String?,
+    onLogin: () -> Unit,
     onLogout: () -> Unit,
     onClearCache: () -> Unit
 ) {
@@ -2139,11 +2155,20 @@ private fun YouBody(
             Column {
                 Text(text = "You", color = Twick.Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    text = "Account and app data",
+                    text = authLogin?.let { "Signed in as @$it" } ?: "Browsing without Twitch",
                     color = Twick.Ink3,
                     fontSize = 12.sp
                 )
             }
+        }
+
+        if (!isLoggedIn) {
+            YouActionRow(
+                label = "Log in with Twitch",
+                description = "Connect when you want to send chat messages and load your followed channels.",
+                icon = Icons.AutoMirrored.Filled.Login,
+                onClick = onLogin
+            )
         }
 
         YouActionRow(
@@ -2152,11 +2177,13 @@ private fun YouBody(
             onClick = onClearCache
         )
 
-        YouActionRow(
-            label = "Sign out",
-            description = "Clears your stored Twitch token only. Saved caches and pinned channels remain.",
-            onClick = onLogout
-        )
+        if (isLoggedIn) {
+            YouActionRow(
+                label = "Sign out",
+                description = "Clears your stored Twitch token only. Saved caches and pinned channels remain.",
+                onClick = onLogout
+            )
+        }
     }
 }
 
@@ -2164,9 +2191,10 @@ private fun YouBody(
 private fun YouActionRow(
     label: String,
     description: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     onClick: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -2174,10 +2202,24 @@ private fun YouActionRow(
             .border(1.dp, Twick.Hairline, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(text = label, color = Twick.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(text = description, color = Twick.Ink3, fontSize = 12.sp)
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Twick.Accent,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = label, color = Twick.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = description, color = Twick.Ink3, fontSize = 12.sp)
+        }
     }
 }
 
@@ -2238,9 +2280,9 @@ private fun BrowseBody(
     onOpenCategory: (Category) -> Unit,
     onCloseCategory: () -> Unit,
     isRefreshing: Boolean,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    initialTab: Int = 0
 ) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var layout by rememberSaveable { mutableStateOf(BrowseLayout.Large) }
     val followingGridState = rememberLazyGridState()
     val followingLargeListState = rememberLazyListState()
@@ -2266,19 +2308,15 @@ private fun BrowseBody(
         return
     }
 
-    val pagerState = rememberPagerState(pageCount = { 3 })
-    val showLayoutToggle = pagerState.currentPage != 2
+    val pagerState = rememberPagerState(
+        initialPage = initialTab.coerceIn(0, 2),
+        pageCount = { 3 }
+    )
+    val selectedTab = pagerState.settledPage
+    val showLayoutToggle = selectedTab != 2
+    val pagerScope = rememberCoroutineScope()
     val sortedFollowedLive = remember(state.followedLive) {
         state.followedLive.sortedByDescending { it.viewerCount }
-    }
-
-    LaunchedEffect(pagerState.currentPage) {
-        selectedTab = pagerState.currentPage
-    }
-    LaunchedEffect(selectedTab) {
-        if (pagerState.currentPage != selectedTab) {
-            pagerState.animateScrollToPage(selectedTab)
-        }
     }
 
     SmoothPullToRefreshBox(
@@ -2289,7 +2327,11 @@ private fun BrowseBody(
         Column(modifier = Modifier.fillMaxSize()) {
             BrowseTabBar(
                 selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
+                onTabSelected = { page ->
+                    if (page != pagerState.settledPage) {
+                        pagerScope.launch { pagerState.animateScrollToPage(page) }
+                    }
+                },
                 layout = layout,
                 onLayoutToggle = { layout = nextBrowseLayout(layout) },
                 showLayoutToggle = showLayoutToggle
@@ -2936,100 +2978,117 @@ private fun BrowseChannelCompactList(
         state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        items(channels, key = { it.login }) { channel ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onJoinChannel(channel.login) }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(
+        itemsIndexed(channels, key = { _, channel -> channel.login }) { index, channel ->
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(thumbnailGradient(channel.login))
+                        .fillMaxWidth()
+                        .clickable { onJoinChannel(channel.login) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (channel.profileImageUrl != null) {
-                        AsyncImage(
-                            model = channel.profileImageUrl,
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(thumbnailGradient(channel.login))
+                    ) {
+                        if (channel.profileImageUrl != null) {
+                            AsyncImage(
+                                model = channel.profileImageUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        val titleText = channel.title?.takeIf { it.isNotBlank() } ?: channel.displayName
+                        Text(
+                            text = titleText,
+                            color = Twick.Ink,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (channel.displayName.isNotBlank() && titleText != channel.displayName) {
+                                Text(
+                                    text = channel.displayName,
+                                    color = Twick.Ink,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (channel.isPartner) {
+                                    PartnerBadge(modifier = Modifier.size(12.dp))
+                                }
+                            }
+                            if (channel.displayName.isNotBlank() && titleText != channel.displayName && !channel.gameName.isNullOrBlank()) {
+                                Text(
+                                    text = "·",
+                                    color = Twick.Ink3,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (!channel.gameName.isNullOrBlank()) {
+                                Text(
+                                    text = channel.gameName,
+                                    color = Twick.Ink3,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Person,
                             contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            tint = Twick.Live,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = formatViewers(channel.viewerCount),
+                            color = Twick.Ink2,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = PublicSansFontFamily
                         )
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    val titleText = channel.title?.takeIf { it.isNotBlank() } ?: channel.displayName
-                    Text(
-                        text = titleText,
-                        color = Twick.Ink,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (channel.displayName.isNotBlank() && titleText != channel.displayName) {
-                            Text(
-                                text = channel.displayName,
-                                color = Twick.Ink,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (channel.isPartner) {
-                                PartnerBadge(modifier = Modifier.size(12.dp))
-                            }
-                        }
-                        if (channel.displayName.isNotBlank() && titleText != channel.displayName && !channel.gameName.isNullOrBlank()) {
-                            Text(
-                                text = "·",
-                                color = Twick.Ink3,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (!channel.gameName.isNullOrBlank()) {
-                            Text(
-                                text = channel.gameName,
-                                color = Twick.Ink3,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Person,
-                        contentDescription = null,
-                        tint = Twick.Live,
-                        modifier = Modifier.size(11.dp)
-                    )
-                    Text(
-                        text = formatViewers(channel.viewerCount),
-                        color = Twick.Ink2,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = PublicSansFontFamily
-                    )
+                if (index < channels.lastIndex) {
+                    CompactChannelDivider()
                 }
             }
         }
     }
+}
+
+@Composable
+private fun CompactChannelDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 50.dp, end = 2.dp, top = 1.dp, bottom = 1.dp)
+            .height(2.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Twick.Ink4.copy(alpha = 0.24f))
+    )
 }
 
 @Composable

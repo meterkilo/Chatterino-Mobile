@@ -10,6 +10,7 @@ import com.example.chatterinomobile.data.local.FollowListCache
 import com.example.chatterinomobile.data.local.PaintDiskCache
 import com.example.chatterinomobile.data.local.PinnedChannelsStore
 import com.example.chatterinomobile.data.local.TokenStore
+import com.example.chatterinomobile.data.local.ViewerSessionStore
 import com.example.chatterinomobile.data.repository.AnonymousAuthRepository
 import com.example.chatterinomobile.data.repository.AuthRepository
 import com.example.chatterinomobile.data.repository.BadgeRepository
@@ -30,6 +31,7 @@ import org.koin.dsl.module
 
 val repositoryModule = module {
     single { TokenStore(get()) }
+    single { ViewerSessionStore(get()) }
 
     single { DiskCacheRoot(get()) }
     single { EmoteDiskCache(get()) }

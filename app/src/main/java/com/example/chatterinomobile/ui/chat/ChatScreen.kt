@@ -9,6 +9,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import android.graphics.Rect
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Icon
@@ -81,6 +84,7 @@ fun ChatRoute(
     isLoggedIn: Boolean,
     authUserId: String?,
     authLogin: String?,
+    onLoginToChat: () -> Unit,
     onBack: () -> Unit
 ) {
     val chatState by chatViewModel.uiState.collectAsState()
@@ -109,6 +113,7 @@ fun ChatRoute(
         onSend = chatViewModel::sendMessage,
         onCancelReply = chatViewModel::cancelReply,
         onReplyToMessage = chatViewModel::beginReply,
+        onLoginToChat = onLoginToChat,
         onBack = {
             streamPlayerViewModel.clear()
             chatViewModel.stopActiveChannel()
@@ -143,6 +148,7 @@ fun ChatScreen(
     onSend: (String) -> Unit,
     onCancelReply: () -> Unit,
     onReplyToMessage: (com.example.chatterinomobile.data.model.ChatMessage) -> Unit,
+    onLoginToChat: () -> Unit,
     onBack: () -> Unit
 ) {
     val canSend = activeChannel.channelLogin != null && isLoggedIn
@@ -153,6 +159,7 @@ fun ChatScreen(
         activeChannel.hydration?.errorMessage == null
     val inputEnabled = canSend && !chatIsLoading
     val inputHint = if (chatIsLoading) "Loading chat" else hint
+    val loginTarget = activeChannel.channel?.displayName ?: activeChannel.channelLogin ?: "this channel"
     val focusManager = LocalFocusManager.current
 
     var pickerOpen by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(false) }
@@ -238,27 +245,31 @@ fun ChatScreen(
                 activeChannel = activeChannel,
                 authLogin = authLogin,
                 focusManager = focusManager,
-                onReplyToMessage = onReplyToMessage,
+                onReplyToMessage = if (isLoggedIn) onReplyToMessage else { _ -> },
                 isLoading = chatIsLoading,
                 modifier = Modifier.weight(1f)
             )
-            ChatInputBar(
-                enabled = inputEnabled,
-                hint = if (chatFullscreen && !chatIsLoading) "$inputHint - press Back to restore video" else inputHint,
-                message = state.sendErrorMessage,
-                messageIsError = state.sendErrorMessage != null,
-                onSend = onSend,
-                pendingReply = state.pendingReply,
-                onCancelReply = onCancelReply,
-                autocompleteResults = autocompleteResults,
-                onAutocompleteQueryChanged = onAutocompleteQueryChanged,
-                onEmotePicker = {
-                    onEmotePickerOpen()
-                    pickerOpen = true
-                },
-                insertEmoteRequest = pendingInsertion,
-                onInsertEmoteRequestConsumed = { pendingInsertion = null }
-            )
+            if (isLoggedIn) {
+                ChatInputBar(
+                    enabled = inputEnabled,
+                    hint = if (chatFullscreen && !chatIsLoading) "$inputHint - press Back to restore video" else inputHint,
+                    message = state.sendErrorMessage,
+                    messageIsError = state.sendErrorMessage != null,
+                    onSend = onSend,
+                    pendingReply = state.pendingReply,
+                    onCancelReply = onCancelReply,
+                    autocompleteResults = autocompleteResults,
+                    onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                    onEmotePicker = {
+                        onEmotePickerOpen()
+                        pickerOpen = true
+                    },
+                    insertEmoteRequest = pendingInsertion,
+                    onInsertEmoteRequestConsumed = { pendingInsertion = null }
+                )
+            } else {
+                LoginToChatBar(channelName = loginTarget, onClick = onLoginToChat)
+            }
         } else if (theaterMode && activeChannel.channelLogin != null) {
             BoxWithConstraints(
                 modifier = Modifier
@@ -323,27 +334,31 @@ fun ChatScreen(
                             activeChannel = activeChannel,
                             authLogin = authLogin,
                             focusManager = focusManager,
-                            onReplyToMessage = onReplyToMessage,
+                            onReplyToMessage = if (isLoggedIn) onReplyToMessage else { _ -> },
                             isLoading = chatIsLoading,
                             modifier = Modifier.weight(1f)
                         )
-                        ChatInputBar(
-                            enabled = inputEnabled,
-                            hint = inputHint,
-                            message = state.sendErrorMessage,
-                            messageIsError = state.sendErrorMessage != null,
-                            onSend = onSend,
-                            pendingReply = state.pendingReply,
-                            onCancelReply = onCancelReply,
-                            autocompleteResults = autocompleteResults,
-                            onAutocompleteQueryChanged = onAutocompleteQueryChanged,
-                            onEmotePicker = {
-                                onEmotePickerOpen()
-                                pickerOpen = true
-                            },
-                            insertEmoteRequest = pendingInsertion,
-                            onInsertEmoteRequestConsumed = { pendingInsertion = null }
-                        )
+                        if (isLoggedIn) {
+                            ChatInputBar(
+                                enabled = inputEnabled,
+                                hint = inputHint,
+                                message = state.sendErrorMessage,
+                                messageIsError = state.sendErrorMessage != null,
+                                onSend = onSend,
+                                pendingReply = state.pendingReply,
+                                onCancelReply = onCancelReply,
+                                autocompleteResults = autocompleteResults,
+                                onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                                onEmotePicker = {
+                                    onEmotePickerOpen()
+                                    pickerOpen = true
+                                },
+                                insertEmoteRequest = pendingInsertion,
+                                onInsertEmoteRequestConsumed = { pendingInsertion = null }
+                            )
+                        } else {
+                            LoginToChatBar(channelName = loginTarget, onClick = onLoginToChat)
+                        }
                     }
                 }
                 if (playerChromeVisible) {
@@ -411,7 +426,7 @@ fun ChatScreen(
                         activeChannel = activeChannel,
                         authLogin = authLogin,
                         focusManager = focusManager,
-                        onReplyToMessage = onReplyToMessage,
+                        onReplyToMessage = if (isLoggedIn) onReplyToMessage else { _ -> },
                         isLoading = chatIsLoading,
                         modifier = Modifier.weight(1f)
                     )
@@ -428,23 +443,27 @@ fun ChatScreen(
                     )
                 }
             }
-            ChatInputBar(
-                enabled = inputEnabled,
-                hint = inputHint,
-                message = state.sendErrorMessage,
-                messageIsError = state.sendErrorMessage != null,
-                onSend = onSend,
-                pendingReply = state.pendingReply,
-                onCancelReply = onCancelReply,
-                autocompleteResults = autocompleteResults,
-                onAutocompleteQueryChanged = onAutocompleteQueryChanged,
-                onEmotePicker = {
-                    onEmotePickerOpen()
-                    pickerOpen = true
-                },
-                insertEmoteRequest = pendingInsertion,
-                onInsertEmoteRequestConsumed = { pendingInsertion = null }
-            )
+            if (isLoggedIn) {
+                ChatInputBar(
+                    enabled = inputEnabled,
+                    hint = inputHint,
+                    message = state.sendErrorMessage,
+                    messageIsError = state.sendErrorMessage != null,
+                    onSend = onSend,
+                    pendingReply = state.pendingReply,
+                    onCancelReply = onCancelReply,
+                    autocompleteResults = autocompleteResults,
+                    onAutocompleteQueryChanged = onAutocompleteQueryChanged,
+                    onEmotePicker = {
+                        onEmotePickerOpen()
+                        pickerOpen = true
+                    },
+                    insertEmoteRequest = pendingInsertion,
+                    onInsertEmoteRequestConsumed = { pendingInsertion = null }
+                )
+            } else {
+                LoginToChatBar(channelName = loginTarget, onClick = onLoginToChat)
+            }
         }
     }
 
@@ -460,6 +479,63 @@ fun ChatScreen(
                 pickerOpen = false
             }
         )
+    }
+}
+
+@Composable
+private fun LoginToChatBar(
+    channelName: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Twick.S1)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Chat is read-only",
+                color = Twick.Ink,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Log in to chat in $channelName",
+                color = Twick.Ink3,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            modifier = Modifier
+                .height(38.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Twick.Accent)
+                .border(1.dp, Twick.Accent.copy(alpha = 0.75f), RoundedCornerShape(10.dp))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Login,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = "Log in to chat",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
     }
 }
 

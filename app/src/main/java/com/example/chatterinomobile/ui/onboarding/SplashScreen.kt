@@ -1,31 +1,18 @@
 package com.example.chatterinomobile.ui.onboarding
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.chatterinomobile.ui.brand.HolographicSevenTvWordmark
-import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
 @Composable
 internal fun SplashScreen(
@@ -51,41 +38,5 @@ internal fun SplashScreen(
             }
         }
 
-        ConnectingPill(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 200.dp)
-        )
-    }
-}
-
-@Composable
-private fun ConnectingPill(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "blink")
-    val alpha by transition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-        label = "blinkAlpha"
-    )
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Twick.Ink4.copy(alpha = alpha))
-        )
-        Text(
-            text = "CONNECTING",
-            color = Twick.Ink4,
-            fontSize = 10.sp,
-            fontFamily = PublicSansFontFamily,
-            letterSpacing = 1.sp
-        )
     }
 }

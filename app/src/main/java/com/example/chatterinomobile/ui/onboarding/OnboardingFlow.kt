@@ -21,9 +21,12 @@ fun OnboardingFlow(
     isLoading: Boolean,
     isLoggedIn: Boolean,
     onConnectTwitch: () -> Unit,
-    onFinish: () -> Unit
+    onFinish: () -> Unit,
+    initialStep: OnboardingStep = OnboardingStep.Splash,
+    onContinueAsGuest: (() -> Unit)? = null,
+    onDismiss: (() -> Unit)? = null
 ) {
-    var step by rememberSaveable { mutableStateOf(OnboardingStep.Splash) }
+    var step by rememberSaveable(initialStep) { mutableStateOf(initialStep) }
     val currentIsLoggedIn by rememberUpdatedState(isLoggedIn)
 
 
@@ -71,8 +74,20 @@ fun OnboardingFlow(
                 onGetStarted = { step = OnboardingStep.ConnectTwitch }
             )
             OnboardingStep.ConnectTwitch -> ConnectTwitchScreen(
-                onBack = { step = OnboardingStep.Welcome },
-                onConnect = onConnectTwitch
+                onBack = {
+                    if (initialStep == OnboardingStep.ConnectTwitch && onDismiss != null) {
+                        onDismiss()
+                    } else {
+                        step = OnboardingStep.Welcome
+                    }
+                },
+                onConnect = onConnectTwitch,
+                onSkip = onContinueAsGuest?.let { continueAsGuest ->
+                    {
+                        continueAsGuest()
+                        onFinish()
+                    }
+                }
             )
             OnboardingStep.EmoteSync -> EmoteSyncScreen(
                 onBack = { step = OnboardingStep.ConnectTwitch },

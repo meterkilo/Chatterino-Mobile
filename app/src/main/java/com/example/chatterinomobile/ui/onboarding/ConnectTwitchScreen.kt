@@ -2,6 +2,7 @@ package com.example.chatterinomobile.ui.onboarding
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +34,8 @@ import com.example.chatterinomobile.ui.theme.Twick
 @Composable
 internal fun ConnectTwitchScreen(
     onBack: () -> Unit,
-    onConnect: () -> Unit
+    onConnect: () -> Unit,
+    onSkip: (() -> Unit)? = null
 ) {
     val density = LocalDensity.current
     val edgeWidthPx = with(density) { 32.dp.toPx() }
@@ -119,10 +121,28 @@ internal fun ConnectTwitchScreen(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp)
         ) {
-            TwitchPrimaryButton(
-                text = "Connect with Twitch",
-                onClick = onConnect
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                TwitchPrimaryButton(
+                    text = "Connect with Twitch",
+                    onClick = onConnect
+                )
+                if (onSkip != null) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = "Skip and connect later",
+                        color = Twick.Ink3,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onSkip)
+                            .padding(horizontal = 14.dp, vertical = 9.dp)
+                    )
+                }
+            }
         }
     }
 }
