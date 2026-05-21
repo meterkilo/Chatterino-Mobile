@@ -7,6 +7,7 @@ import com.example.chatterinomobile.data.local.FollowListCache
 import com.example.chatterinomobile.data.model.Category
 import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.data.remote.api.TwitchHelixApi
+import com.example.chatterinomobile.data.remote.dto.HelixGameDto
 import com.example.chatterinomobile.data.remote.dto.HelixStreamDto
 import com.example.chatterinomobile.data.repository.AuthRepository
 import kotlinx.coroutines.CancellationException
@@ -52,13 +53,16 @@ class DiscoveryViewModel(
 
     private var searchJob: Job? = null
     private var pinnedChannelsJob: Job? = null
+    private var categoryCountsJob: Job? = null
+    private var foregroundRefreshJob: Job? = null
+    private var followRefreshJob: Job? = null
 
     init {
         load()
     }
 
     fun refresh() {
-        load(showRefreshIndicator = true)
+        quickRefresh()
         refreshActiveCategoryStreams()
     }
 
@@ -130,28 +134,18 @@ class DiscoveryViewModel(
                 .associateBy { it.login.lowercase() }
             val channels = results
                 .map { dto ->
-                    async {
-                        val followerCount = runCatching {
-                            helixApi.getChannelFollowerCount(dto.id)
-                        }.getOrElse { error ->
-                            if (error is CancellationException) throw error
-                            null
-                        }
-                        Channel(
-                            id = dto.id,
-                            login = dto.broadcasterLogin,
-                            displayName = dto.displayName,
-                            isLive = dto.isLive,
-                            followerCount = followerCount,
-                            gameName = dto.gameName,
-                            title = dto.title,
-                            profileImageUrl = usersByLogin[dto.broadcasterLogin.lowercase()]?.profileImageUrl
-                                ?: dto.thumbnailUrl,
-                            isPartner = usersByLogin[dto.broadcasterLogin.lowercase()]?.broadcasterType == "partner"
-                        )
-                    }
+                    val user = usersByLogin[dto.broadcasterLogin.lowercase()]
+                    Channel(
+                        id = dto.id,
+                        login = dto.broadcasterLogin,
+                        displayName = dto.displayName,
+                        isLive = dto.isLive,
+                        gameName = dto.gameName,
+                        title = dto.title,
+                        profileImageUrl = user?.profileImageUrl ?: dto.thumbnailUrl,
+                        isPartner = user?.broadcasterType == "partner"
+                    )
                 }
-                .awaitAll()
                 .sortedWith(
                     compareByDescending<Channel> { it.isLive }
                         .thenBy { it.displayName.lowercase() }
@@ -166,53 +160,66 @@ class DiscoveryViewModel(
                 val userId = authRepository.getUserId()
                 val userKey = userId ?: ANON_KEY
 
-                val snapshot = snapshotCache.read(userKey)
                 val followSnapshot = if (userId != null) followListCache.read(userId) else null
                 val cachedLogins = followSnapshot?.logins
                 val shouldRefreshFollows = userId != null &&
                     (cachedLogins == null ||
                         System.currentTimeMillis() - followSnapshot.savedAtEpochMillis >= FOLLOW_LIST_TTL_MILLIS)
 
-                if (snapshot != null) {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = showRefreshIndicator,
-                            followedLive = snapshot.followedLive,
-                            followedLogins = cachedLogins ?: it.followedLogins,
-                            knownChannels = mergeChannels(it.knownChannels, snapshot.followedLive),
-                            recommendedStreams = snapshot.topLiveStreams.take(10),
-                            topLiveStreams = snapshot.topLiveStreams,
-                            topCategories = snapshot.topCategories,
-                            error = null
-                        )
-                    }
-                } else {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = true,
-                            isRefreshing = showRefreshIndicator,
-                            error = null
-                        )
-                    }
-                    if (cachedLogins != null) {
-                        _uiState.update { it.copy(followedLogins = cachedLogins) }
-                    }
-                }
-
-                if (snapshot != null && !showRefreshIndicator) {
-                    // Keep startup smooth: paint cached data immediately, then do a small live refresh.
-                    delay(BACKGROUND_REFRESH_DELAY_MILLIS)
+                _uiState.update { current ->
+                    current.copy(
+                        isLoading = !showRefreshIndicator,
+                        isRefreshing = showRefreshIndicator,
+                        followedLive = if (showRefreshIndicator) current.followedLive else emptyList(),
+                        followedLogins = cachedLogins ?: current.followedLogins,
+                        recommendedStreams = if (showRefreshIndicator) current.recommendedStreams else emptyList(),
+                        topLiveStreams = if (showRefreshIndicator) current.topLiveStreams else emptyList(),
+                        topCategories = if (showRefreshIndicator) current.topCategories else emptyList(),
+                        error = null
+                    )
                 }
 
                 loadLiveAndRecommended(
                     userId = userId,
                     logins = cachedLogins,
                     refreshFollows = showRefreshIndicator || shouldRefreshFollows,
-                    includeExpensiveCategoryCounts = showRefreshIndicator || snapshot == null
+                    includeExpensiveCategoryCounts = true,
+                    lightweight = false
                 )
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, isRefreshing = false, error = e.message) }
+            }
+        }
+    }
+
+    private fun quickRefresh() {
+        if (_uiState.value.isRefreshing) return
+        foregroundRefreshJob?.cancel()
+        foregroundRefreshJob = viewModelScope.launch {
+            val userId = authRepository.getUserId()
+            val userKey = userId ?: ANON_KEY
+            val cachedLogins = if (userId != null) followListCache.read(userId)?.logins else null
+            val followedLogins = cachedLogins ?: _uiState.value.followedLogins
+
+            _uiState.update {
+                it.copy(
+                    isRefreshing = true,
+                    followedLogins = followedLogins,
+                    error = null
+                )
+            }
+
+            try {
+                loadLiveAndRecommended(
+                    userId = userId,
+                    logins = followedLogins,
+                    refreshFollows = false,
+                    includeExpensiveCategoryCounts = true,
+                    lightweight = true
+                )
+                refreshFollowListInBackground(userId = userId, userKey = userKey)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRefreshing = false, error = e.message) }
             }
         }
     }
@@ -221,8 +228,12 @@ class DiscoveryViewModel(
         userId: String?,
         logins: List<String>?,
         refreshFollows: Boolean,
-        includeExpensiveCategoryCounts: Boolean
+        includeExpensiveCategoryCounts: Boolean,
+        lightweight: Boolean
     ) {
+        categoryCountsJob?.cancel()
+        categoryCountsJob = null
+
         coroutineScope {
             val freshFollowsDeferred = if (refreshFollows && userId != null) {
                 async { fetchAllFollows(userId) }
@@ -245,6 +256,9 @@ class DiscoveryViewModel(
             }
 
             val topStreams = topStreamsDeferred.await()
+            val knownByLogin = _uiState.value.knownChannels
+                .distinctBy { it.login.lowercase() }
+                .associateBy { it.login.lowercase() }
 
             val followedLive: List<Channel> = if (followedLogins.isNotEmpty()) {
                 val liveStreams = followedLogins
@@ -257,24 +271,28 @@ class DiscoveryViewModel(
                     .awaitAll()
                     .flatten()
 
-                val liveLogins = liveStreams.map { it.userLogin }
-                val usersByLogin = if (liveLogins.isNotEmpty()) {
-                    liveLogins
-                        .chunked(100)
-                        .map { batch ->
-                            async {
-                                runCatching { helixApi.getUsersByLogin(batch) }.getOrElse { emptyList() }
+                val usersByLogin = if (!lightweight) {
+                    val liveLogins = liveStreams.map { it.userLogin }
+                    if (liveLogins.isNotEmpty()) {
+                        liveLogins
+                            .chunked(100)
+                            .map { batch ->
+                                async {
+                                    runCatching { helixApi.getUsersByLogin(batch) }.getOrElse { emptyList() }
+                                }
                             }
-                        }
-                        .awaitAll()
-                        .flatten()
-                        .associateBy { it.login }
+                            .awaitAll()
+                            .flatten()
+                            .associateBy { it.login }
+                    } else emptyMap()
                 } else emptyMap()
 
                 val streamsByLogin = liveStreams.associateBy { it.userLogin }
                 followedLogins
                     .mapNotNull { login -> streamsByLogin[login] }
                     .map { stream ->
+                        val key = stream.userLogin.lowercase()
+                        val known = knownByLogin[key]
                         val user = usersByLogin[stream.userLogin]
                         Channel(
                             id = stream.userId,
@@ -285,14 +303,14 @@ class DiscoveryViewModel(
                             gameName = stream.gameName,
                             title = stream.title,
                             thumbnailUrl = thumbnailUrl(stream.thumbnailUrl),
-                            profileImageUrl = user?.profileImageUrl,
-                            isPartner = user?.broadcasterType == "partner"
+                            profileImageUrl = user?.profileImageUrl ?: known?.profileImageUrl,
+                            isPartner = user?.broadcasterType == "partner" || known?.isPartner == true
                         )
                     }
             } else emptyList()
 
             val followedLoginSet = followedLogins.toSet()
-            val followedChannels = if (followedLogins.isNotEmpty() && (refreshFollows || logins == null)) {
+            val followedChannels = if (!lightweight && followedLogins.isNotEmpty() && (refreshFollows || logins == null)) {
                 runCatching { fetchChannelsByLogin(followedLogins) }
                     .getOrElse { error ->
                         if (error is CancellationException) throw error
@@ -302,21 +320,24 @@ class DiscoveryViewModel(
                 emptyList()
             }
 
-            val topUsers = topStreams
-                .map { it.userLogin }
-                .chunked(100)
-                .map { batch ->
-                    async {
-                        runCatching { helixApi.getUsersByLogin(batch) }.getOrElse { emptyList() }
+            val topUsers = if (!lightweight) {
+                topStreams
+                    .map { it.userLogin }
+                    .chunked(100)
+                    .map { batch ->
+                        async {
+                            runCatching { helixApi.getUsersByLogin(batch) }.getOrElse { emptyList() }
+                        }
                     }
-                }
-                .awaitAll()
-                .flatten()
-                .associateBy { it.login }
+                    .awaitAll()
+                    .flatten()
+                    .associateBy { it.login }
+            } else emptyMap()
 
             val topLive = topStreams
                 .sortedByDescending { it.viewerCount }
                 .map { stream ->
+                    val known = knownByLogin[stream.userLogin.lowercase()]
                     Channel(
                         id = stream.userId,
                         login = stream.userLogin,
@@ -326,8 +347,8 @@ class DiscoveryViewModel(
                         gameName = stream.gameName,
                         title = stream.title,
                         thumbnailUrl = thumbnailUrl(stream.thumbnailUrl),
-                        profileImageUrl = topUsers[stream.userLogin]?.profileImageUrl,
-                        isPartner = topUsers[stream.userLogin]?.broadcasterType == "partner"
+                        profileImageUrl = topUsers[stream.userLogin]?.profileImageUrl ?: known?.profileImageUrl,
+                        isPartner = topUsers[stream.userLogin]?.broadcasterType == "partner" || known?.isPartner == true
                     )
                 }
 
@@ -339,36 +360,10 @@ class DiscoveryViewModel(
                 .mapValues { (_, list) -> list.sumOf { it.viewerCount } }
 
             val topGames = topGamesDeferred.await()
-            val sampledViewersByGameId = if (includeExpensiveCategoryCounts) {
-                topGames
-                    .take(CATEGORY_COUNT_SAMPLE_GAME_LIMIT)
-                    .map { game ->
-                        async {
-                            val streams = runCatching {
-                                fetchCategoryStreams(game.id, CATEGORY_COUNT_STREAM_SAMPLE)
-                            }.getOrElse { error ->
-                                if (error is CancellationException) throw error
-                                emptyList()
-                            }
-                            game.id to streams.sumOf { it.viewerCount }
-                        }
-                    }
-                    .awaitAll()
-                    .toMap()
-            } else {
-                emptyMap()
-            }
-
-            val topCategories = topGames.map { game ->
-                Category(
-                    id = game.id,
-                    name = game.name,
-                    boxArtUrl = boxArtUrl(game.boxArtUrl),
-                    viewerCount = sampledViewersByGameId[game.id]
-                        ?: viewersFromTopStreamsByGameId[game.id]
-                        ?: 0
-                )
-            }
+            val topCategories = buildTopCategories(
+                topGames = topGames,
+                fallbackViewersByGameId = viewersFromTopStreamsByGameId
+            )
 
             _uiState.update {
                 it.copy(
@@ -395,8 +390,139 @@ class DiscoveryViewModel(
                     topCategories = topCategories
                 )
             }
+
+            if (includeExpensiveCategoryCounts && topGames.isNotEmpty()) {
+                categoryCountsJob = viewModelScope.launch {
+                    val sampledViewersByGameId = sampleCategoryViewerCounts(topGames)
+                    if (sampledViewersByGameId.isEmpty()) return@launch
+
+                    val refreshedTopCategories = buildTopCategories(
+                        topGames = topGames,
+                        fallbackViewersByGameId = viewersFromTopStreamsByGameId,
+                        sampledViewersByGameId = sampledViewersByGameId
+                    )
+
+                    _uiState.update { current ->
+                        current.copy(
+                            topCategories = current.topCategories.map { category ->
+                                sampledViewersByGameId[category.id]?.let { category.copy(viewerCount = it) }
+                                    ?: category
+                            }
+                        )
+                    }
+
+                    runCatching {
+                        snapshotCache.write(
+                            userKey = userId ?: ANON_KEY,
+                            followedLive = followedLive,
+                            topLiveStreams = topLive,
+                            topCategories = refreshedTopCategories
+                        )
+                    }
+                }
+            }
         }
     }
+
+    private fun refreshFollowListInBackground(userId: String?, userKey: String) {
+        if (userId == null) return
+        followRefreshJob?.cancel()
+        followRefreshJob = viewModelScope.launch {
+            val fresh = runCatching { fetchAllFollows(userId) }
+                .getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    emptyList()
+                }
+            if (fresh.isEmpty()) return@launch
+
+            followListCache.write(userId, fresh)
+            _uiState.update { it.copy(followedLogins = fresh) }
+
+            val liveStreams = fresh
+                .chunked(100)
+                .map { batch ->
+                    async {
+                        runCatching { helixApi.getStreamsByLogin(batch) }.getOrElse { emptyList() }
+                    }
+                }
+                .awaitAll()
+                .flatten()
+
+            val knownByLogin = _uiState.value.knownChannels
+                .distinctBy { it.login.lowercase() }
+                .associateBy { it.login.lowercase() }
+            val streamsByLogin = liveStreams.associateBy { it.userLogin }
+            val followedSet = fresh.toSet()
+            val followedLive = fresh
+                .mapNotNull { login -> streamsByLogin[login] }
+                .map { stream ->
+                    val known = knownByLogin[stream.userLogin.lowercase()]
+                    Channel(
+                        id = stream.userId,
+                        login = stream.userLogin,
+                        displayName = stream.userName,
+                        isLive = true,
+                        viewerCount = stream.viewerCount,
+                        gameName = stream.gameName,
+                        title = stream.title,
+                        thumbnailUrl = thumbnailUrl(stream.thumbnailUrl),
+                        profileImageUrl = known?.profileImageUrl,
+                        isPartner = known?.isPartner == true
+                    )
+                }
+
+            _uiState.update {
+                it.copy(
+                    followedLive = followedLive,
+                    knownChannels = mergeChannels(it.knownChannels, followedLive),
+                    recommendedStreams = it.topLiveStreams.filter { channel -> channel.login !in followedSet }.take(10)
+                )
+            }
+
+            runCatching {
+                snapshotCache.write(
+                    userKey = userKey,
+                    followedLive = followedLive,
+                    topLiveStreams = _uiState.value.topLiveStreams,
+                    topCategories = _uiState.value.topCategories
+                )
+            }
+        }
+    }
+
+    private fun buildTopCategories(
+        topGames: List<HelixGameDto>,
+        fallbackViewersByGameId: Map<String, Int>,
+        sampledViewersByGameId: Map<String, Int> = emptyMap()
+    ): List<Category> = topGames.map { game ->
+        Category(
+            id = game.id,
+            name = game.name,
+            boxArtUrl = boxArtUrl(game.boxArtUrl),
+            viewerCount = sampledViewersByGameId[game.id]
+                ?: fallbackViewersByGameId[game.id]
+                ?: 0
+        )
+    }
+
+    private suspend fun sampleCategoryViewerCounts(topGames: List<HelixGameDto>): Map<String, Int> =
+        coroutineScope {
+            topGames
+                .take(CATEGORY_COUNT_SAMPLE_GAME_LIMIT)
+                .map { game ->
+                    async {
+                        val streams = runCatching {
+                            fetchCategoryStreams(game.id, CATEGORY_COUNT_STREAM_SAMPLE)
+                        }.getOrElse { error ->
+                            if (error is CancellationException) throw error
+                            emptyList()
+                        }
+                        game.id to streams.sumOf { it.viewerCount }
+                    }
+                }
+                .awaitAll()
+                .toMap()
+        }
 
     private suspend fun fetchAllFollows(userId: String): List<String> {
         val all = mutableListOf<String>()

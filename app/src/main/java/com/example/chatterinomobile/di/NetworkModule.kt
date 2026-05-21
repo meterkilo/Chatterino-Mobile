@@ -1,6 +1,5 @@
 package com.example.chatterinomobile.di
 
-import com.example.chatterinomobile.BuildConfig
 import com.example.chatterinomobile.data.remote.api.BttvApi
 import com.example.chatterinomobile.data.remote.api.ChatterinoApi
 import com.example.chatterinomobile.data.remote.api.FfzApi
@@ -40,7 +39,7 @@ val networkModule = module {
             }
             install(Logging) {
                 logger = Logger.DEFAULT
-                level = if (BuildConfig.DEBUG) LogLevel.BODY else LogLevel.INFO
+                level = LogLevel.INFO
             }
             install(HttpTimeout) {
                 requestTimeoutMillis = 15_000

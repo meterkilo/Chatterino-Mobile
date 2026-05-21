@@ -1,5 +1,6 @@
 package com.example.chatterinomobile.ui.chat
 
+import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -67,6 +68,8 @@ import com.example.chatterinomobile.MainActivity
 import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
 import com.example.chatterinomobile.ui.player.TwitchStreamStage
 import androidx.activity.compose.LocalActivity
+import com.example.chatterinomobile.ui.common.SkeletonBox
+import com.example.chatterinomobile.ui.common.rememberSkeletonBrush
 import com.example.chatterinomobile.ui.theme.Twick
 import coil.compose.AsyncImage
 
@@ -124,6 +127,7 @@ fun ChatRoute(
 }
 
 @Composable
+@SuppressLint("UnusedBoxWithConstraintsScope")
 fun ChatScreen(
     state: ChatUiState,
     messages: List<com.example.chatterinomobile.data.model.ChatMessage>,
@@ -143,6 +147,12 @@ fun ChatScreen(
 ) {
     val canSend = activeChannel.channelLogin != null && isLoggedIn
     val hint = composeHint(activeChannel, isLoggedIn)
+    val chatIsLoading = activeChannel.channelLogin != null &&
+        messages.isEmpty() &&
+        activeChannel.hydration?.isReady != true &&
+        activeChannel.hydration?.errorMessage == null
+    val inputEnabled = canSend && !chatIsLoading
+    val inputHint = if (chatIsLoading) "Loading chat" else hint
     val focusManager = LocalFocusManager.current
 
     var pickerOpen by rememberSaveable(activeChannel.channelLogin) { mutableStateOf(false) }
@@ -229,11 +239,12 @@ fun ChatScreen(
                 authLogin = authLogin,
                 focusManager = focusManager,
                 onReplyToMessage = onReplyToMessage,
+                isLoading = chatIsLoading,
                 modifier = Modifier.weight(1f)
             )
             ChatInputBar(
-                enabled = canSend,
-                hint = if (chatFullscreen) "$hint - press Back to restore video" else hint,
+                enabled = inputEnabled,
+                hint = if (chatFullscreen && !chatIsLoading) "$inputHint - press Back to restore video" else inputHint,
                 message = state.sendErrorMessage,
                 messageIsError = state.sendErrorMessage != null,
                 onSend = onSend,
@@ -313,11 +324,12 @@ fun ChatScreen(
                             authLogin = authLogin,
                             focusManager = focusManager,
                             onReplyToMessage = onReplyToMessage,
+                            isLoading = chatIsLoading,
                             modifier = Modifier.weight(1f)
                         )
                         ChatInputBar(
-                            enabled = canSend,
-                            hint = hint,
+                            enabled = inputEnabled,
+                            hint = inputHint,
                             message = state.sendErrorMessage,
                             messageIsError = state.sendErrorMessage != null,
                             onSend = onSend,
@@ -400,6 +412,7 @@ fun ChatScreen(
                         authLogin = authLogin,
                         focusManager = focusManager,
                         onReplyToMessage = onReplyToMessage,
+                        isLoading = chatIsLoading,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -416,8 +429,8 @@ fun ChatScreen(
                 }
             }
             ChatInputBar(
-                enabled = canSend,
-                hint = hint,
+                enabled = inputEnabled,
+                hint = inputHint,
                 message = state.sendErrorMessage,
                 messageIsError = state.sendErrorMessage != null,
                 onSend = onSend,
@@ -639,21 +652,89 @@ private fun ChatMessagePane(
     authLogin: String?,
     focusManager: FocusManager,
     onReplyToMessage: (com.example.chatterinomobile.data.model.ChatMessage) -> Unit,
+    isLoading: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .clearComposerFocusOnTap(focusManager)
     ) {
-        ChatList(
-            messages = messages,
-            deletedIds = state.deletedIds,
-            paintsByUserId = state.paintsByUserId,
-            showTimestamp = false,
-            modifier = Modifier.fillMaxSize(),
-            currentUserLogin = activeChannel.userState?.login ?: authLogin,
-            onReplyToMessage = onReplyToMessage
-        )
+        if (isLoading) {
+            ChatMessagesLoading()
+        } else {
+            ChatList(
+                messages = messages,
+                deletedIds = state.deletedIds,
+                paintsByUserId = state.paintsByUserId,
+                showTimestamp = false,
+                modifier = Modifier.fillMaxSize(),
+                currentUserLogin = activeChannel.userState?.login ?: authLogin,
+                onReplyToMessage = onReplyToMessage
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatMessagesLoading(modifier: Modifier = Modifier) {
+    val brush = rememberSkeletonBrush()
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        repeat(13) { index ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier.size(24.dp),
+                    shape = CircleShape
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        SkeletonBox(
+                            brush = brush,
+                            modifier = Modifier
+                                .width((58 + index % 4 * 12).dp)
+                                .height(10.dp)
+                        )
+                        SkeletonBox(
+                            brush = brush,
+                            modifier = Modifier
+                                .width((34 + index % 3 * 8).dp)
+                                .height(8.dp)
+                        )
+                    }
+                    SkeletonBox(
+                        brush = brush,
+                        modifier = Modifier
+                            .fillMaxWidth(0.54f + (index % 5) * 0.08f)
+                            .height(11.dp)
+                    )
+                    if (index % 3 == 1) {
+                        SkeletonBox(
+                            brush = brush,
+                            modifier = Modifier
+                                .fillMaxWidth(0.36f + (index % 2) * 0.18f)
+                                .height(11.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

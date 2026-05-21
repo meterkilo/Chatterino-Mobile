@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -31,7 +32,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -51,7 +51,6 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
@@ -71,9 +70,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnAttach
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.example.chatterinomobile.ui.channels.ActiveChannelState
+import com.example.chatterinomobile.ui.common.SkeletonBox
+import com.example.chatterinomobile.ui.common.rememberSkeletonBrush
 import com.example.chatterinomobile.ui.common.rememberSoftHaptic
 import com.example.chatterinomobile.ui.theme.Twick
 import kotlinx.coroutines.delay
@@ -414,7 +416,7 @@ private fun StreamPlayerFrame(
         }
 
         if (isLoading && !loadError) {
-            StreamLoadingSpinner()
+            StreamLoadingSkeleton(modifier = Modifier.matchParentSize())
         }
 
         if (loadError) {
@@ -470,25 +472,64 @@ private fun StreamPlayerFrame(
 }
 
 @Composable
-private fun StreamLoadingSpinner(modifier: Modifier = Modifier) {
+private fun StreamLoadingSkeleton(modifier: Modifier = Modifier) {
+    val brush = rememberSkeletonBrush(alpha = 0.72f)
     Box(
         modifier = modifier
-            .size(42.dp)
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.42f)),
-        contentAlignment = Alignment.Center
+            .background(Color.Black.copy(alpha = 0.82f))
+            .padding(14.dp)
     ) {
-        CircularProgressIndicator(
-            color = Color.White.copy(alpha = 0.86f),
-            strokeWidth = 2.dp,
-            trackColor = Color.White.copy(alpha = 0.16f),
-            strokeCap = StrokeCap.Round,
-            modifier = Modifier.size(22.dp)
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .width(88.dp)
+                .height(22.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(999.dp)
         )
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(58.dp),
+            shape = CircleShape
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth(0.72f),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth(0.74f)
+                    .height(12.dp)
+            )
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(9.dp)
+            )
+        }
+        Row(
+            modifier = Modifier.align(Alignment.BottomEnd),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            repeat(3) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier.size(28.dp),
+                    shape = CircleShape
+                )
+            }
+        }
     }
 }
 
 @Composable
+@androidx.annotation.OptIn(UnstableApi::class)
 private fun NativePlayerSurface(
     playerViewModel: StreamPlayerViewModel,
     modifier: Modifier = Modifier

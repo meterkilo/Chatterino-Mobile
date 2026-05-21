@@ -1,7 +1,6 @@
 package com.example.chatterinomobile.ui.discovery
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -36,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -44,10 +44,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
@@ -56,7 +54,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -64,9 +61,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +73,7 @@ import androidx.compose.material3.pulltorefresh.pullToRefreshIndicator
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
@@ -111,8 +107,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -127,6 +121,9 @@ import coil.compose.AsyncImage
 import com.example.chatterinomobile.data.model.Category
 import com.example.chatterinomobile.data.model.Channel
 import com.example.chatterinomobile.ui.brand.HolographicSevenTvWordmark
+import com.example.chatterinomobile.ui.common.SkeletonBox
+import com.example.chatterinomobile.ui.common.rememberSkeletonBrush
+import com.example.chatterinomobile.ui.common.skeleton
 import com.example.chatterinomobile.ui.common.rememberSoftHaptic
 import com.example.chatterinomobile.ui.theme.PublicSansFontFamily
 import com.example.chatterinomobile.ui.theme.Twick
@@ -189,7 +186,8 @@ fun DiscoveryScreen(
                     .padding(bottom = 64.dp)
             ) {
                 when {
-                    state.isLoading && state.followedLive.isEmpty() && state.recommendedStreams.isEmpty() -> LoadingBody()
+                    state.isLoading && state.followedLive.isEmpty() && state.recommendedStreams.isEmpty() ->
+                        InitialDiscoveryLoadingBody(activeTab = activeTab)
                     state.error != null && state.followedLive.isEmpty() && state.recommendedStreams.isEmpty() ->
                         ErrorBody(message = state.error!!, onRetry = viewModel::refresh)
                     else -> when (activeTab) {
@@ -206,7 +204,7 @@ fun DiscoveryScreen(
                             onJoinChannel = onJoinChannel,
                             onOpenCategory = viewModel::openCategory,
                             onCloseCategory = viewModel::closeCategory,
-                            isRefreshing = state.isRefreshing || state.isLoadingCategoryStreams,
+                            isRefreshing = state.isRefreshing,
                             onRefresh = viewModel::refresh
                         )
                         2 -> YouBody(
@@ -218,7 +216,7 @@ fun DiscoveryScreen(
                             onJoinChannel = onJoinChannel,
                             onOpenCategory = viewModel::openCategory,
                             onCloseCategory = viewModel::closeCategory,
-                            isRefreshing = state.isRefreshing || state.isLoadingCategoryStreams,
+                            isRefreshing = state.isRefreshing,
                             onRefresh = viewModel::refresh
                         )
                     }
@@ -228,6 +226,35 @@ fun DiscoveryScreen(
             DiscoveryBottomBar(
                 activeTab = activeTab,
                 onTabSelected = { activeTab = it },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+    }
+}
+
+@Composable
+fun DiscoveryLoadingScreen(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Twick.Bg)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 64.dp)
+            ) {
+                InitialDiscoveryLoadingBody(activeTab = 0)
+            }
+
+            DiscoveryBottomBar(
+                activeTab = 0,
+                onTabSelected = {},
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
@@ -258,17 +285,17 @@ private fun SearchBody(
 
             when {
                 state.searchQuery.isBlank() -> SearchEmptyText(text = "Search channels")
-                state.isSearching -> LoadingBody()
+                state.isSearching -> SearchLoadingBody()
                 state.searchResults.isEmpty() -> SearchEmptyText(text = "No channels found")
-                else -> Column(
+                else -> LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
+                        .weight(1f)
                 ) {
-                    state.searchResults.forEach { channel ->
+                    items(state.searchResults, key = { it.login }) { channel ->
                         SearchResultRow(channel = channel, onClick = { onJoinChannel(channel.login) })
                     }
-                    Spacer(Modifier.height(16.dp))
+                    item { Spacer(Modifier.height(16.dp)) }
                 }
             }
         }
@@ -448,9 +475,545 @@ private fun formatFollowers(count: Int): String =
     }
 
 @Composable
-private fun LoadingBody() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CleanLoadingSpinner()
+private fun InitialDiscoveryLoadingBody(activeTab: Int) {
+    when (activeTab) {
+        0 -> HomeLoadingBody()
+        1 -> BrowseLoadingBody()
+        else -> YouLoadingBody()
+    }
+}
+
+@Composable
+private fun HomeLoadingBody() {
+    val brush = rememberSkeletonBrush()
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item(key = "loading-stories") {
+            Spacer(Modifier.height(12.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+            ) {
+                items(6) { index ->
+                    StoryLoadingItem(brush = brush, index = index)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        item(key = "loading-header") {
+            HomeHeaderLoading(brush = brush)
+        }
+        item(key = "loading-filters") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(54.dp, 62.dp, 78.dp).forEach { width ->
+                    SkeletonBox(
+                        brush = brush,
+                        modifier = Modifier
+                            .width(width)
+                            .height(36.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
+        item(key = "loading-hero") {
+            HomeHeroLoading(brush = brush)
+        }
+        item(key = "loading-pinned-title") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .width(92.dp)
+                        .height(13.dp)
+                )
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .width(78.dp)
+                        .height(18.dp),
+                    shape = RoundedCornerShape(9.dp)
+                )
+            }
+        }
+        items(7) { index ->
+            PinnedRowLoading(
+                brush = brush,
+                index = index,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.5.dp)
+            )
+        }
+        item(key = "loading-bottom-space") { Spacer(Modifier.height(160.dp)) }
+    }
+}
+
+@Composable
+private fun StoryLoadingItem(brush: Brush, index: Int) {
+    Column(
+        modifier = Modifier.width(72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier.size(70.dp),
+            shape = CircleShape
+        )
+        Spacer(Modifier.height(7.dp))
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .width((42 + index % 3 * 8).dp)
+                .height(9.dp)
+        )
+        Spacer(Modifier.height(5.dp))
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .width((30 + index % 2 * 10).dp)
+                .height(8.dp),
+            shape = RoundedCornerShape(4.dp)
+        )
+    }
+}
+
+@Composable
+private fun HomeHeaderLoading(brush: Brush) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 10.dp, top = 14.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier.size(32.dp),
+                shape = RoundedCornerShape(10.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .width(86.dp)
+                        .height(21.dp)
+                )
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .width(118.dp)
+                        .height(10.dp)
+                )
+            }
+        }
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier.size(40.dp),
+            shape = CircleShape
+        )
+    }
+}
+
+@Composable
+private fun HomeHeroLoading(brush: Brush) {
+    Column(
+        modifier = Modifier
+            .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Twick.S1)
+            .border(1.dp, Twick.Hairline.copy(alpha = 0.28f), RoundedCornerShape(24.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .skeleton(brush, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+        ) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .width(82.dp)
+                    .height(22.dp),
+                shape = RoundedCornerShape(999.dp)
+            )
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(56.dp),
+                shape = CircleShape
+            )
+        }
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            SkeletonBox(brush = brush, modifier = Modifier.size(40.dp), shape = CircleShape)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                SkeletonBox(brush = brush, modifier = Modifier.fillMaxWidth(0.42f).height(13.dp))
+                SkeletonBox(brush = brush, modifier = Modifier.fillMaxWidth(0.78f).height(10.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PinnedRowLoading(brush: Brush, index: Int, modifier: Modifier = Modifier) {
+    val shape = when (index % 4) {
+        1 -> RoundedCornerShape(topStart = 24.dp, topEnd = 12.dp, bottomEnd = 24.dp, bottomStart = 12.dp)
+        2 -> RoundedCornerShape(16.dp)
+        3 -> RoundedCornerShape(topStart = 12.dp, topEnd = 24.dp, bottomEnd = 12.dp, bottomStart = 24.dp)
+        else -> RoundedCornerShape(20.dp)
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clip(shape)
+            .background(Twick.S1)
+            .border(1.dp, Twick.Hairline, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier.size(if (index % 3 == 0) 52.dp else 48.dp),
+            shape = CircleShape
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth(0.44f + (index % 3) * 0.11f)
+                    .height(12.dp)
+            )
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth(0.62f + (index % 2) * 0.13f)
+                    .height(10.dp)
+            )
+        }
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .width((36 + index % 3 * 8).dp)
+                .height(10.dp)
+        )
+    }
+}
+
+@Composable
+private fun BrowseLoadingBody() {
+    val brush = rememberSkeletonBrush()
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var layout by rememberSaveable { mutableStateOf(BrowseLayout.Large) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        BrowseTabBar(
+            selectedTab = selectedTab,
+            onTabSelected = { selectedTab = it },
+            layout = layout,
+            onLayoutToggle = { layout = nextBrowseLayout(layout) },
+            showLayoutToggle = selectedTab != 2
+        )
+        if (selectedTab == 2) {
+            BrowseCategoryLoadingGrid(brush = brush)
+        } else {
+            BrowseChannelLoadingContent(layout = layout, brush = brush)
+        }
+    }
+}
+
+@Composable
+private fun SearchLoadingBody() {
+    val brush = rememberSkeletonBrush()
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 18.dp)
+    ) {
+        items(8) { index ->
+            SearchResultLoadingRow(brush = brush, index = index)
+        }
+    }
+}
+
+@Composable
+private fun SearchResultLoadingRow(brush: Brush, index: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SkeletonBox(brush = brush, modifier = Modifier.size(44.dp), shape = CircleShape)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth(0.44f + (index % 4) * 0.08f)
+                    .height(12.dp)
+            )
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier
+                    .fillMaxWidth(0.54f + (index % 3) * 0.10f)
+                    .height(9.dp)
+            )
+        }
+        SkeletonBox(
+            brush = brush,
+            modifier = Modifier
+                .width(46.dp)
+                .height(18.dp),
+            shape = RoundedCornerShape(6.dp)
+        )
+    }
+}
+
+@Composable
+private fun YouLoadingBody() {
+    val brush = rememberSkeletonBrush()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            SkeletonBox(
+                brush = brush,
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(16.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                SkeletonBox(brush = brush, modifier = Modifier.width(64.dp).height(16.dp))
+                SkeletonBox(brush = brush, modifier = Modifier.width(142.dp).height(10.dp))
+            }
+        }
+        repeat(2) { index ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Twick.S2)
+                    .border(1.dp, Twick.Hairline, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth(if (index == 0) 0.62f else 0.32f)
+                        .height(13.dp)
+                )
+                SkeletonBox(brush = brush, modifier = Modifier.fillMaxWidth().height(9.dp))
+                SkeletonBox(brush = brush, modifier = Modifier.fillMaxWidth(0.72f).height(9.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryStreamsLoadingBody(layout: BrowseLayout) {
+    val brush = rememberSkeletonBrush()
+    BrowseChannelLoadingContent(layout = layout, brush = brush)
+}
+
+@Composable
+private fun BrowseChannelLoadingContent(layout: BrowseLayout, brush: Brush) {
+    when (layout) {
+        BrowseLayout.Grid -> BrowseChannelGridLoading(brush = brush)
+        BrowseLayout.Large -> BrowseChannelLargeLoadingList(brush = brush)
+        BrowseLayout.Compact -> BrowseChannelCompactLoadingList(brush = brush)
+    }
+}
+
+@Composable
+private fun BrowseChannelGridLoading(brush: Brush) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(8) { index ->
+            Column(modifier = Modifier.fillMaxWidth()) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(Modifier.height(7.dp))
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth(0.82f - (index % 3) * 0.08f)
+                        .height(11.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth(0.54f + (index % 2) * 0.10f)
+                        .height(9.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowseChannelLargeLoadingList(brush: Brush) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        items(4) { index ->
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .skeleton(brush, RoundedCornerShape(10.dp))
+                ) {
+                    SkeletonBox(
+                        brush = brush,
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .width(54.dp)
+                            .height(20.dp),
+                        shape = RoundedCornerShape(6.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SkeletonBox(brush = brush, modifier = Modifier.size(36.dp), shape = CircleShape)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        SkeletonBox(
+                            brush = brush,
+                            modifier = Modifier
+                                .fillMaxWidth(0.82f - (index % 2) * 0.13f)
+                                .height(13.dp)
+                        )
+                        SkeletonBox(
+                            brush = brush,
+                            modifier = Modifier
+                                .fillMaxWidth(0.56f + (index % 3) * 0.09f)
+                                .height(10.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowseChannelCompactLoadingList(brush: Brush) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        items(10) { index ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SkeletonBox(brush = brush, modifier = Modifier.size(40.dp), shape = CircleShape)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    SkeletonBox(
+                        brush = brush,
+                        modifier = Modifier
+                            .fillMaxWidth(0.58f + (index % 3) * 0.11f)
+                            .height(12.dp)
+                    )
+                    SkeletonBox(
+                        brush = brush,
+                        modifier = Modifier
+                            .fillMaxWidth(0.42f + (index % 2) * 0.12f)
+                            .height(9.dp)
+                    )
+                }
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowseCategoryLoadingGrid(brush: Brush) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(8) { index ->
+            Column(modifier = Modifier.fillMaxWidth()) {
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(3f / 4f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(Modifier.height(7.dp))
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth(0.70f - (index % 3) * 0.07f)
+                        .height(11.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                SkeletonBox(
+                    brush = brush,
+                    modifier = Modifier
+                        .fillMaxWidth(0.44f + (index % 2) * 0.10f)
+                        .height(9.dp)
+                )
+            }
+        }
     }
 }
 
@@ -519,25 +1082,6 @@ private fun SmoothRefreshIndicator(
             rotation = if (isRefreshing) spin else progress * 160f,
             sweep = if (isRefreshing) 92f else 40f + progress.coerceAtMost(1f) * 236f,
             alpha = if (isRefreshing) 1f else progress.coerceIn(0.25f, 1f),
-            modifier = Modifier.size(22.dp)
-        )
-    }
-}
-
-@Composable
-private fun CleanLoadingSpinner(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(42.dp)
-            .clip(CircleShape)
-            .background(Twick.S1.copy(alpha = 0.86f)),
-        contentAlignment = Alignment.Center
-    ) {
-        CircularProgressIndicator(
-            color = Twick.Ink2,
-            strokeWidth = 2.dp,
-            trackColor = Twick.S3.copy(alpha = 0.34f),
-            strokeCap = StrokeCap.Round,
             modifier = Modifier.size(22.dp)
         )
     }
@@ -746,15 +1290,26 @@ private fun HomeBody(
     ) {
         buildHomePinnedItems(state, pinnedChannelLogins)
     }
-    val carouselChannels = (state.followedLive + state.recommendedStreams)
-        .distinctBy { it.login }
-        .take(10)
-    val channelsByLogin = (state.followedLive + state.recommendedStreams + state.searchResults + state.knownChannels)
-        .distinctBy { it.login.lowercase() }
-        .associateBy { it.login.lowercase() }
-    val heroChannel = pinnedChannelLogins
-        .map { it.lowercase().removePrefix("#").trim() }
-        .firstNotNullOfOrNull { login -> channelsByLogin[login]?.takeIf { it.isLive } }
+    val carouselChannels = remember(state.followedLive, state.recommendedStreams) {
+        (state.followedLive + state.recommendedStreams)
+            .distinctBy { it.login }
+            .take(10)
+    }
+    val channelsByLogin = remember(
+        state.followedLive,
+        state.recommendedStreams,
+        state.searchResults,
+        state.knownChannels
+    ) {
+        (state.followedLive + state.recommendedStreams + state.searchResults + state.knownChannels)
+            .distinctBy { it.login.lowercase() }
+            .associateBy { it.login.lowercase() }
+    }
+    val heroChannel = remember(pinnedChannelLogins, channelsByLogin) {
+        pinnedChannelLogins
+            .map { it.lowercase().removePrefix("#").trim() }
+            .firstNotNullOfOrNull { login -> channelsByLogin[login]?.takeIf { it.isLive } }
+    }
     var selectedFilter by remember { mutableIntStateOf(0) }
     var selectedSortMode by remember { mutableStateOf(PinnedSortMode.Recent) }
     val visiblePinnedItems = remember(pinnedItems, selectedFilter, selectedSortMode) {
@@ -777,81 +1332,87 @@ private fun HomeBody(
             )
         }
     }
-    val liveCount = pinnedItems.count { it.isLive }
-    val scrollState = rememberScrollState()
-    var headerBottomContentPx by remember { mutableIntStateOf(0) }
-    val showFab = headerBottomContentPx > 0 && scrollState.value > headerBottomContentPx
+    val liveCount = remember(pinnedItems) { pinnedItems.count { it.isLive } }
+    val listState = rememberLazyListState()
+    val showFab by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 1 || listState.firstVisibleItemScrollOffset > 220
+        }
+    }
 
     SmoothPullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize()
     ) {
-        Column(
+        LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
         ) {
             if (carouselChannels.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                LiveFollowingRow(channels = carouselChannels, onClick = onJoinChannel)
-                Spacer(Modifier.height(6.dp))
+                item(key = "carousel") {
+                    Spacer(Modifier.height(12.dp))
+                    LiveFollowingRow(channels = carouselChannels, onClick = onJoinChannel)
+                    Spacer(Modifier.height(6.dp))
+                }
             }
 
-            HomeHeader(
-                liveCount = liveCount,
-                savedCount = pinnedItems.size,
-                onSearch = onSearch,
-                modifier = Modifier.onGloballyPositioned { coords ->
-                    headerBottomContentPx = (coords.positionInParent().y + coords.size.height).toInt()
-                }
-            )
-            HomeFilterPills(selectedFilter = selectedFilter, onFilterSelected = { selectedFilter = it })
+            item(key = "header") {
+                HomeHeader(
+                    liveCount = liveCount,
+                    savedCount = pinnedItems.size,
+                    onSearch = onSearch
+                )
+            }
+            item(key = "filters") {
+                HomeFilterPills(selectedFilter = selectedFilter, onFilterSelected = { selectedFilter = it })
+            }
 
             if (heroChannel != null) {
-                HomeHeroCard(channel = heroChannel, onJoinChannel = onJoinChannel)
+                item(key = "hero-${heroChannel.login}") {
+                    HomeHeroCard(channel = heroChannel, onJoinChannel = onJoinChannel)
+                }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Pinned Chats",
-                    color = Twick.Ink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                PinnedSortMenu(
-                    selected = selectedSortMode,
-                    onSelected = { selectedSortMode = it }
-                )
+            item(key = "pinned-header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Pinned Chats",
+                        color = Twick.Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    PinnedSortMenu(
+                        selected = selectedSortMode,
+                        onSelected = { selectedSortMode = it }
+                    )
+                }
             }
 
             if (pinnedItems.isEmpty()) {
-                EmptyHomePinnedState(onSearch = onSearch)
+                item(key = "empty-pins") { EmptyHomePinnedState(onSearch = onSearch) }
             } else if (visiblePinnedItems.isEmpty()) {
-                EmptyFilteredPinnedState()
+                item(key = "empty-filter") { EmptyFilteredPinnedState() }
             } else {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    visiblePinnedItems.forEachIndexed { index, item ->
-                        PinnedRow(
-                            item = item,
-                            index = index,
-                            onClick = { onJoinChannel(item.login) },
-                            onRemovePin = { onRemovePin(item.login) }
-                        )
-                    }
+                itemsIndexed(visiblePinnedItems, key = { _, item -> item.login }) { index, item ->
+                    PinnedRow(
+                        item = item,
+                        index = index,
+                        onClick = { onJoinChannel(item.login) },
+                        onRemovePin = { onRemovePin(item.login) },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.5.dp)
+                    )
                 }
             }
 
-            Spacer(Modifier.height(160.dp))
+            item(key = "bottom-spacer") { Spacer(Modifier.height(160.dp)) }
         }
 
         AnimatedVisibility(
@@ -1178,7 +1739,8 @@ private fun PinnedRow(
     item: PinnedItem,
     index: Int,
     onClick: () -> Unit,
-    onRemovePin: () -> Unit
+    onRemovePin: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val restShape = when (index % 4) {
         1 -> RoundedCornerShape(topStart = 24.dp, topEnd = 12.dp, bottomEnd = 24.dp, bottomStart = 12.dp)
@@ -1192,7 +1754,7 @@ private fun PinnedRow(
     val actionWidthPx = with(density) { actionWidth.toPx() }
     val swipeProgress = (-offsetX / actionWidthPx).coerceIn(0f, 1f)
 
-    Box(modifier = Modifier.height(72.dp)) {
+    Box(modifier = modifier.height(72.dp)) {
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -1686,7 +2248,7 @@ private fun BrowseBody(
     val liveGridState = rememberLazyGridState()
     val liveLargeListState = rememberLazyListState()
     val liveCompactListState = rememberLazyListState()
-    val categoriesScrollState = rememberScrollState()
+    val categoriesGridState = rememberLazyGridState()
 
     val activeCategory = state.activeCategory
     if (activeCategory != null) {
@@ -1758,7 +2320,7 @@ private fun BrowseBody(
                     else -> BrowseCategoriesGrid(
                         categories = state.topCategories,
                         onOpenCategory = onOpenCategory,
-                        scrollState = categoriesScrollState
+                        state = categoriesGridState
                     )
                 }
             }
@@ -1881,36 +2443,26 @@ private fun BrowseChannelList(
 private fun BrowseCategoriesGrid(
     categories: List<Category>,
     onOpenCategory: (Category) -> Unit,
-    scrollState: ScrollState = rememberScrollState()
+    state: LazyGridState = rememberLazyGridState()
 ) {
     if (categories.isEmpty()) {
         BrowseEmpty("No categories available")
         return
     }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-            .verticalScroll(scrollState)
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        state = state,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Spacer(Modifier.height(8.dp))
-        categories.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                pair.forEach { category ->
-                    CategoryGridCard(
-                        category = category,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onOpenCategory(category) }
-                    )
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(12.dp))
+        gridItems(categories, key = { it.id }) { category ->
+            CategoryGridCard(
+                category = category,
+                onClick = { onOpenCategory(category) }
+            )
         }
-        Spacer(Modifier.height(16.dp))
     }
 }
 
@@ -2095,7 +2647,7 @@ private fun CategoryDetailBody(
                 }
             }
             when {
-                isLoading && channels.isEmpty() -> LoadingBody()
+                isLoading && channels.isEmpty() -> CategoryStreamsLoadingBody(layout = layout)
                 channels.isEmpty() -> BrowseEmpty("No live streams in this category")
                 else -> BrowseChannelList(
                     channels = channels,

@@ -32,6 +32,7 @@ import com.example.chatterinomobile.ui.auth.TwitchAuthLauncher
 import com.example.chatterinomobile.ui.channels.ChannelTabsViewModel
 import com.example.chatterinomobile.ui.chat.ChatRoute
 import com.example.chatterinomobile.ui.chat.ChatViewModel
+import com.example.chatterinomobile.ui.discovery.DiscoveryLoadingScreen
 import com.example.chatterinomobile.ui.discovery.DiscoveryScreen
 import com.example.chatterinomobile.ui.onboarding.OnboardingFlow
 import com.example.chatterinomobile.ui.player.StreamPlayerViewModel
@@ -76,9 +77,11 @@ class MainActivity : ComponentActivity() {
             val joinedChannels by tabsViewModel.joinedChannels.collectAsState()
 
             var onboardingComplete by rememberSaveable { mutableStateOf(false) }
+            val isCompletingOAuth = authState.isAwaitingAuthorization && authState.isLoading
+            val showMainApp = onboardingComplete || (authState.isLoggedIn && !authState.isLoading)
             LaunchedEffect(authState.isLoggedIn, authState.isLoading) {
                 if (authState.isLoggedIn && !authState.isLoading && !onboardingComplete) {
-                    if (savedInstanceState == null) onboardingComplete = true
+                    onboardingComplete = true
                 }
                 if (!authState.isLoggedIn && !authState.isLoading && onboardingComplete) {
                     onboardingComplete = false
@@ -121,12 +124,18 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    !onboardingComplete -> OnboardingFlow(
-                        isLoading = authState.isLoading,
-                        isLoggedIn = authState.isLoggedIn,
-                        onConnectTwitch = authViewModel::startLogin,
-                        onFinish = { onboardingComplete = true }
-                    )
+                    !showMainApp -> {
+                        if (isCompletingOAuth) {
+                            DiscoveryLoadingScreen()
+                        } else {
+                            OnboardingFlow(
+                                isLoading = authState.isLoading,
+                                isLoggedIn = authState.isLoggedIn,
+                                onConnectTwitch = authViewModel::startLogin,
+                                onFinish = { onboardingComplete = true }
+                            )
+                        }
+                    }
 
                     else -> Scaffold(
                         modifier = Modifier
